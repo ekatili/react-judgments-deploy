@@ -44,9 +44,16 @@ interface ChatChunk {
   chunk_no?: number;
 }
 
+// ----- Small runtime helpers -----
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 // ----- Normalize / unwrap different search payload shapes to a SearchHit[] -----
-function normalizeSearchResults(data: any): SearchHit[] {
-  if (data && typeof data === "object" && Array.isArray(data.hits)) return data.hits;
+function normalizeSearchResults(data: unknown): SearchHit[] {
+  if (isObject(data) && Array.isArray((data as Record<string, unknown>).hits)) {
+    return (data as { hits: unknown[] }).hits as SearchHit[];
+  }
   if (Array.isArray(data)) return data as SearchHit[];
   return [];
 }
@@ -56,8 +63,8 @@ async function fetchDocPreview(docId: number, signal?: AbortSignal): Promise<Doc
   try {
     const r = await fetch(apiUrl(`/docs/${docId}/preview`), { signal, cache: "no-store" });
     if (!r.ok) return null;
-    const j = await r.json();
-    return j as DocMeta | null;
+    const j: unknown = await r.json();
+    return (isObject(j) ? (j as DocMeta) : null);
   } catch {
     return null;
   }
@@ -202,15 +209,16 @@ export default function Page() {
         signal: ac.signal,
       });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-      const data = await r.json();
+      const data: unknown = await r.json();
       const hits = normalizeSearchResults(data);
 
       setResults(hits);
       setExpandedMeta({});
       setExpandedSet(new Set());
-    } catch (err: any) {
-      if (err?.name !== "AbortError") {
-        setErrorMsg(err?.message ?? String(err));
+    } catch (err: unknown) {
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setErrorMsg(msg);
       }
     } finally {
       if (searchAbortRef.current === ac) searchAbortRef.current = null;
@@ -500,17 +508,23 @@ function ChatPanel({
         signal: ac.signal,
       });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-      const j = await r.json();
+      const j: unknown = await r.json();
 
-      const cleaned = cleanLLMAnswer(j?.answer ?? "(no answer)");
-      const newChunks: ChatChunk[] = Array.isArray(j?.chunks) ? j.chunks : [];
+      const cleaned = cleanLLMAnswer(isObject(j) && "answer" in j ? String((j as Record<string, unknown>).answer ?? "(no answer)") : "(no answer)");
+      const newChunks: ChatChunk[] = (isObject(j) && Array.isArray((j as Record<string, unknown>).chunks))
+        ? ((j as { chunks: ChatChunk[] }).chunks)
+        : [];
+
       setAnswer(cleaned);
       setChunks(newChunks);
 
       const ts = Date.now();
       setQaLog((prev) => [...prev, { q, a: cleaned, chunks: newChunks, ts }]);
-    } catch (err: any) {
-      if (err?.name !== "AbortError") alert(`Chat error: ${err?.message ?? err}`);
+    } catch (err: unknown) {
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        const msg = err instanceof Error ? err.message : String(err);
+        alert(`Chat error: ${msg}`);
+      }
     } finally {
       if (askAbortRef.current === ac) askAbortRef.current = null;
       setIsLoading(false);
