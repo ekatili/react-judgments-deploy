@@ -1,5 +1,6 @@
 import "./globals.css";
 import ThemeSwitch from "../components/ThemeSwitch";
+import { Suspense } from "react";
 
 export const metadata = {
   title: "Tanzania Judgments Explorer",
@@ -22,12 +23,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: initTheme }} />
       </head>
       <body>
-  {/* Float on desktop only */}
-  <div className="hidden md:block fixed right-4 top-4 z-50">
-    <ThemeSwitch />
-  </div>
-  {children}
-</body>
+        {/* Float on desktop only */}
+        <div className="hidden md:block fixed right-4 top-4 z-50">
+          <ThemeSwitch />
+        </div>
+
+        {/* Global Suspense boundary so Client Components like useSearchParams() are safe at build time */}
+        <Suspense fallback={null}>
+          {children}
+        </Suspense>
+      </body>
     </html>
   );
 }

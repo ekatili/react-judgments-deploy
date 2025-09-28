@@ -2,23 +2,18 @@
 
 /**
  * Next.js (App Router) page — Tanzania Judgments Explorer (Pro UX)
- * ----------------------------------------------------------------
- * Works in two modes:
- *  A) ENV  : Set NEXT_PUBLIC_API_URL (e.g., https://<backend-id>.ngrok-free.app)
- *  B) Proxy: Leave it unset and add a Next.js rewrite: /api/* -> http://localhost:8000/*
  */
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AnswerDisplay from "../components/AnswerDisplay"; // Markdown-rendered answer card
 
 // ===== API base & helper =====
 const ABS_API = (process.env.NEXT_PUBLIC_API_URL || "").trim();
-// If ABS_API is set, use it. Otherwise, fall back to Next proxy path /api/*
 const apiUrl = (path: string) =>
   ABS_API ? `${ABS_API}${path}` : `/api${path.startsWith("/") ? path : `/${path}`}`;
 
-// ----- Types for search results and document meta returned by your FastAPI -----
+// ----- Types -----
 interface SearchHit {
   doc_id?: number | string;
   id?: number | string;
@@ -29,27 +24,21 @@ interface SearchHit {
   parties?: string;
   date_of_judgment?: string;
 }
-
 interface DocMeta {
   case_line?: string;
   court_title?: string;
   parties?: string;
   date_of_judgment?: string;
-  summary?: string; // NEW
+  summary?: string;
 }
-
 interface ChatChunk {
   text?: string;
   preview?: string;
   chunk_no?: number;
 }
-
-// ----- Small runtime helpers -----
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-
-// ----- Normalize / unwrap different search payload shapes to a SearchHit[] -----
 function normalizeSearchResults(data: unknown): SearchHit[] {
   if (isObject(data) && Array.isArray((data as Record<string, unknown>).hits)) {
     return (data as { hits: unknown[] }).hits as SearchHit[];
@@ -57,20 +46,18 @@ function normalizeSearchResults(data: unknown): SearchHit[] {
   if (Array.isArray(data)) return data as SearchHit[];
   return [];
 }
-
-// [NEW] Preview fetch (uses /docs/{id}/preview and returns summary + light meta)
 async function fetchDocPreview(docId: number, signal?: AbortSignal): Promise<DocMeta | null> {
   try {
     const r = await fetch(apiUrl(`/docs/${docId}/preview`), { signal, cache: "no-store" });
     if (!r.ok) return null;
     const j: unknown = await r.json();
-    return (isObject(j) ? (j as DocMeta) : null);
+    return isObject(j) ? (j as DocMeta) : null;
   } catch {
     return null;
   }
 }
 
-// ----- Small UI helpers (Banner, Card, SectionTitle) -----
+// ----- Small UI helpers -----
 function Banner({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-amber-300/30 bg-amber-100 text-amber-900 px-4 py-3 text-sm">
@@ -78,7 +65,6 @@ function Banner({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={`rounded-2xl border border-slate-800/40 bg-slate-900/60 shadow-lg backdrop-blur ${className}`}>
@@ -86,15 +72,25 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
     </div>
   );
 }
-
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="text-lg font-semibold tracking-tight text-slate-100">{children}</h2>;
 }
 
-// ============================================================================
-// Page() — top-level page component: search UI, results, and chat panel mount
-// ============================================================================
+/**
+ * Exported page: wraps the body in Suspense so useSearchParams() is legal at build time.
+ */
 export default function Page() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-slate-950 text-slate-200"><div className="mx-auto max-w-5xl p-6">Loading…</div></main>}>
+      <PageBody />
+    </Suspense>
+  );
+}
+
+// ============================================================================
+// PageBody() — the original page content (uses useSearchParams)
+// ============================================================================
+function PageBody() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -161,7 +157,7 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // ----- Keyboard shortcut Cmd/Ctrl+/ to focus the search input -----
+  // ----- Keyboard shortcut Cmd/Ctrl+/ -----
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().includes("MAC");
@@ -186,15 +182,13 @@ export default function Page() {
     router.replace(qs ? `/?${qs}` : "/");
   }
 
-  // ----- Run a search against /search (POST) with the current query -----
+  // ----- Run a search against /search -----
   async function doSearch(qStr?: string) {
     const q = (qStr ?? query).trim();
     if (!q) return;
 
-    // reflect query into URL, clear any selected doc
     writeUrl({ q, doc: null });
 
-    // cancel any previous in-flight search
     searchAbortRef.current?.abort();
     const ac = new AbortController();
     searchAbortRef.current = ac;
@@ -226,7 +220,7 @@ export default function Page() {
     }
   }
 
-  // ----- Expand/Collapse a search result; fetch its meta on first open -----
+  // ----- Expand/Collapse a search result -----
   async function toggleExpand(hit: SearchHit) {
     const docId = (hit.doc_id ?? hit.id) as number | string | undefined;
     if (docId == null) return;
@@ -245,7 +239,7 @@ export default function Page() {
         const ac = new AbortController();
         metaAbortRef.current.set(idNum, ac);
 
-        const meta = await fetchDocPreview(idNum, ac.signal); // preview fetch
+        const meta = await fetchDocPreview(idNum, ac.signal);
         setExpandedMeta((m) => ({ ...m, [idNum]: meta }));
         if (metaAbortRef.current.get(idNum) === ac) metaAbortRef.current.delete(idNum);
       }
@@ -273,10 +267,8 @@ export default function Page() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]"> 
-
+    <main className="min-h-screen bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
       <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500" />
-
       <div className="mx-auto max-w-5xl px-4 py-8 md:py-10">
         <div className="mb-6">
           <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
@@ -299,9 +291,7 @@ export default function Page() {
             role="search"
             aria-label="Search judgments"
           >
-            <label className="sr-only" htmlFor="q">
-              Search judgments
-            </label>
+            <label className="sr-only" htmlFor="q">Search judgments</label>
             <input
               id="q"
               ref={searchBoxRef}
@@ -440,7 +430,7 @@ export default function Page() {
 }
 
 // ============================================================================
-// ChatPanel() — ask a question about the selected doc, show answer + history
+// ChatPanel (unchanged from your working version)
 // ============================================================================
 function ChatPanel({
   selectedDoc,
@@ -483,7 +473,6 @@ function ChatPanel({
     setHistoryExcerpts((prev) => ({ ...prev, [ts]: !prev[ts] }));
   }
 
-  // ----- Ask the backend: /chat (POST) with doc_id, question, k -----
   async function ask() {
     const q = question.trim();
     if (!q) return;
@@ -510,10 +499,13 @@ function ChatPanel({
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       const j: unknown = await r.json();
 
-      const cleaned = cleanLLMAnswer(isObject(j) && "answer" in j ? String((j as Record<string, unknown>).answer ?? "(no answer)") : "(no answer)");
-      const newChunks: ChatChunk[] = (isObject(j) && Array.isArray((j as Record<string, unknown>).chunks))
-        ? ((j as { chunks: ChatChunk[] }).chunks)
-        : [];
+      const cleaned = cleanLLMAnswer(
+        isObject(j) && "answer" in j ? String((j as Record<string, unknown>).answer ?? "(no answer)") : "(no answer)"
+      );
+      const newChunks: ChatChunk[] =
+        isObject(j) && Array.isArray((j as Record<string, unknown>).chunks)
+          ? ((j as { chunks: ChatChunk[] }).chunks)
+          : [];
 
       setAnswer(cleaned);
       setChunks(newChunks);
@@ -665,9 +657,7 @@ function ChatPanel({
             }}
           />
           <div className="flex items-center gap-3">
-            <label className="text-xs text-indigo-200" htmlFor="k-range">
-              k
-            </label>
+            <label className="text-xs text-indigo-200" htmlFor="k-range">k</label>
             <input
               id="k-range"
               type="range"
