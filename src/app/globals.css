@@ -1,26 +1,238 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
+/* ========= Base tokens (overridden by themes) ========= */
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  --surface: #ffffff;
+  --border: #e2e8f0;
+
+  --accent: #2563eb;            /* blue-600 */
+  --accent-contrast: #ffffff;
+
+  --muted-bg: #f1f5f9;          /* slate-100 */
+  --muted-text: #334155;        /* slate-700 */
+
+  --font-sans: var(--font-geist-sans, Arial, Helvetica, sans-serif);
+  --font-mono: var(--font-geist-mono, "Courier New", monospace);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* Apply tokens to the page */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
+
+/* ========= THEME MAPS (10 options) ========= */
+
+/* 1) light (default) */
+html[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #171717;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --accent: #2563eb;
+  --accent-contrast: #ffffff;
+  --muted-bg: #f1f5f9;
+  --muted-text: #334155;
+}
+
+/* 2) dark */
+html[data-theme="dark"] {
+  --background: #0b1220;
+  --foreground: #e5e7eb;
+  --surface: #111827;
+  --border: #374151;
+  --accent: #60a5fa;
+  --accent-contrast: #0b1220;
+  --muted-bg: #1f2937;
+  --muted-text: #cbd5e1;
+}
+
+/* 3) sepia */
+html[data-theme="sepia"] {
+  --background: #f8f1e5;
+  --foreground: #2b2b2b;
+  --surface: #fffaf0;
+  --border: #e2d6c2;
+  --accent: #a16207;            /* amber-700 */
+  --accent-contrast: #ffffff;
+  --muted-bg: #f3e8d7;
+  --muted-text: #6b4f2a;
+}
+
+/* 4) solarized-light */
+html[data-theme="solarized-light"] {
+  --background: #fdf6e3;
+  --foreground: #586e75;
+  --surface: #fffdf2;
+  --border: #e6dfc8;
+  --accent: #268bd2;
+  --accent-contrast: #002b36;
+  --muted-bg: #eee8d5;
+  --muted-text: #586e75;
+}
+
+/* 5) solarized-dark */
+html[data-theme="solarized-dark"] {
+  --background: #002b36;
+  --foreground: #eee8d5;
+  --surface: #073642;
+  --border: #0d3a46;
+  --accent: #b58900;
+  --accent-contrast: #002b36;
+  --muted-bg: #0a3944;
+  --muted-text: #cbd5e1;
+}
+
+/* 6) nord */
+html[data-theme="nord"] {
+  --background: #eceff4;
+  --foreground: #2e3440;
+  --surface: #ffffff;
+  --border: #d8dee9;
+  --accent: #5e81ac;
+  --accent-contrast: #ffffff;
+  --muted-bg: #e5e9f0;
+  --muted-text: #4c566a;
+}
+
+/* 7) forest */
+html[data-theme="forest"] {
+  --background: #0f1e17;
+  --foreground: #e7f6ec;
+  --surface: #13281f;
+  --border: #1f3b2e;
+  --accent: #34d399;            /* emerald-400/500 */
+  --accent-contrast: #0b1220;
+  --muted-bg: #163024;
+  --muted-text: #c7ead8;
+}
+
+/* 8) rose */
+html[data-theme="rose"] {
+  --background: #fff1f2;
+  --foreground: #3f0a11;
+  --surface: #fff7f8;
+  --border: #fbcfe8;
+  --accent: #e11d48;            /* rose-600 */
+  --accent-contrast: #ffffff;
+  --muted-bg: #ffe4e6;
+  --muted-text: #831843;
+}
+
+/* 9) ocean */
+html[data-theme="ocean"] {
+  --background: #f0f9ff;
+  --foreground: #0c4a6e;
+  --surface: #ffffff;
+  --border: #bae6fd;
+  --accent: #0284c7;            /* ocean blue */
+  --accent-contrast: #ffffff;
+  --muted-bg: #e0f2fe;
+  --muted-text: #075985;
+}
+
+/* 10) high-contrast */
+html[data-theme="high-contrast"] {
+  --background: #ffffff;
+  --foreground: #000000;
+  --surface: #ffffff;
+  --border: #000000;
+  --accent: #0000ff;
+  --accent-contrast: #ffffff;
+  --muted-bg: #eeeeee;
+  --muted-text: #000000;
+}
+
+/* ========= COMPONENT STYLES USING VARS ========= */
+
+/* Answer card */
+.answer-card {
+  @apply relative rounded-2xl mt-4 p-5;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.06),
+    0 4px 8px rgba(16, 24, 40, 0.08);
+}
+
+.answer-header { @apply mb-3 flex items-center gap-3; }
+
+.answer-icon {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  background: var(--muted-bg);
+  color: var(--accent);
+}
+
+.answer-title { @apply text-sm font-medium; color: var(--foreground); }
+
+.answer-copy {
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  background: transparent;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+.answer-copy:hover { background: var(--muted-bg); }
+
+/* Markdown container (Tailwind Typography via CSS vars) */
+.answer-container {
+  @apply prose max-w-none;
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: color-mix(in oklab, var(--foreground) 60%, transparent);
+  --tw-prose-bullets: color-mix(in oklab, var(--accent) 60%, transparent);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: color-mix(in oklab, var(--foreground) 60%, transparent);
+  --tw-prose-code: var(--accent);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--muted-bg);
+}
+
+.answer-container h2 {
+  @apply text-xl font-semibold tracking-tight mt-2 mb-2 border-b pb-1;
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.answer-container p { @apply leading-relaxed mb-4; color: var(--foreground); }
+.answer-container ul { @apply list-disc ml-5 space-y-1 mb-4; }
+.answer-container li::marker { color: var(--accent); }
+.answer-container a { color: var(--accent); }
+
+/* Optional: inline citation wrapper like <span data-citation> */
+.answer-container span[data-citation] {
+  color: color-mix(in oklab, var(--foreground) 65%, transparent);
+  font-size: 0.875rem;
+}
+
+/* Subtle punctuation polish */
+.answer-container :where(p, li) { hanging-punctuation: first allow-end; }
+
+.result-title {
+  font-weight: 600;
+  line-height: 1.3;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.result-parties {
+  margin-top: 0.25rem;      /* mt-1 */
+  font-size: 0.9rem;        /* ~text-sm */
+  color: var(--muted-text); /* theme-aware */
+}
+

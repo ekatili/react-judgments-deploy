@@ -1,0 +1,5 @@
+Run the app:
+
+npm run dev
+
+and open http://localhost:3000
