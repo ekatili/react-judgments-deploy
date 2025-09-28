@@ -393,7 +393,7 @@ function PageBody() {
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
                                 onClick={() => window.open(apiUrl(`/doc/${docId}/pdf`), "_blank")}
                               >
-                                📄 View Judgement
+                                📜 View Judgement
                               </button>
                             </div>
                           )}
