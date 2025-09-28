@@ -328,7 +328,7 @@ function PageBody() {
 
         {results.length > 0 ? (
           <div className="mt-6 space-y-3">
-            <SectionTitle>📑 Search Results</SectionTitle>
+            <SectionTitle>🔍 Search Results</SectionTitle>
             <ul className="space-y-3">
               {results.map((hit, idx) => {
                 const docId = (hit.doc_id ?? hit.id) as number | string | undefined;
