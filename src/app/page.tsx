@@ -2,11 +2,14 @@
 
 /**
  * Next.js (App Router) page — Tanzania Judgments Explorer (Pro UX)
+ * Adds rotating placeholder guidance + clickable example chips.
  */
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import AnswerDisplay from "../components/AnswerDisplay"; // Markdown-rendered answer card
+// SAFETY: avoid SSR issues if AnswerDisplay uses browser-only APIs
+import dynamic from "next/dynamic";
+const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
 
 // ---- Input guards ----------------------------------------------
 const MAX_SEARCH_LEN = 160; // adjust as needed
@@ -133,6 +136,16 @@ function PageBody() {
   const [selectedDoc, setSelectedDoc] = React.useState<{ id: number; label: string } | null>(null);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
+  // --- Search guidance examples & rotating hint ---
+  const EXAMPLES = [
+    "Tundu Lissu",
+    "land disputes",
+    "Judge Mchome ",
+    "robbery with violence",
+    "election petition",
+  ];
+  const [hintIndex, setHintIndex] = React.useState(0);
+
   // ----- Refs -----
   const searchAbortRef = React.useRef<AbortController | null>(null);
   const metaAbortRef = React.useRef<Map<number, AbortController>>(new Map());
@@ -156,6 +169,14 @@ function PageBody() {
       ignore = true;
     };
   }, []);
+
+  // ----- Rotate example hint every 4s -----
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      setHintIndex((i) => (i + 1) % EXAMPLES.length);
+    }, 4000);
+    return () => clearInterval(id);
+  }, []); // EXAMPLES is a stable literal
 
   // ----- If URL has ?doc=, reflect it into selectedDoc on first load -----
   React.useEffect(() => {
@@ -210,7 +231,9 @@ function PageBody() {
   // ----- Run a search against /search -----
   async function doSearch(qStr?: string) {
     const raw = qStr ?? query;
-    const q = sanitizeText(raw, MAX_SEARCH_LEN);
+
+    // strict sanitize ONLY here (do NOT re-declare q twice)
+    const q = sanitizeText(raw, MAX_SEARCH_LEN);  // collapses whitespace + trims ends
     if (!q) return;
 
     if (raw.length > MAX_SEARCH_LEN) {
@@ -248,6 +271,13 @@ function PageBody() {
       if (searchAbortRef.current === ac) searchAbortRef.current = null;
       setIsSearching(false);
     }
+  }
+
+  // ----- Clickable example: set + search -----
+  function pickExample(example: string) {
+    const clipped = sanitizeText(example, MAX_SEARCH_LEN);
+    setQuery(clipped);
+    void doSearch(clipped);
   }
 
   // ----- Expand/Collapse a search result -----
@@ -306,7 +336,7 @@ function PageBody() {
               ⚖️ Tanzania Judgments Explorer
             </span>
           </h1>
-          <p className="mt-2 text-slate-300/90">Search, Chat, and View Court Judgments — Smarter with AI.</p>
+          <p className="mt-2 text-slate-300/90">Search Tanzania court judgments instantly — by keyword, party, or judge.</p>
         </div>
 
         {reachable === false && <Banner>Backend API is not reachable. Make sure FastAPI is running.</Banner>}
@@ -326,10 +356,10 @@ function PageBody() {
               id="q"
               ref={searchBoxRef}
               value={query}
-              onChange={(e) => setQuery(sanitizeText(e.target.value, MAX_SEARCH_LEN))}
+              onChange={(e) => setQuery(e.target.value)} // allow natural typing; sanitize on submit
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
-              placeholder="Type to search… (Cmd/Ctrl+/ to focus)"
+              placeholder={`Type to search… e.g. ${EXAMPLES[hintIndex]} (Cmd/Ctrl+/ to focus)`}
               className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
               autoComplete="off"
               inputMode="search"
@@ -356,6 +386,21 @@ function PageBody() {
               {errorMsg}
             </p>
           )}
+
+          {/* Search guidance examples */}
+          <div className="mt-3 text-sm text-slate-300/80 flex flex-wrap items-center gap-2">
+            <span className="opacity-70">Try:</span>
+            {EXAMPLES.slice(0, 4).map((ex, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => pickExample(ex)}
+                className="rounded-full bg-slate-800 hover:bg-slate-700 px-3 py-1"
+              >
+                {ex}
+              </button>
+            ))}
+          </div>
         </Card>
 
         {results.length > 0 ? (
@@ -672,7 +717,7 @@ function ChatPanel({
           <input
             id="chat-question-input"
             value={question}
-            onChange={(e) => setQuestion(sanitizeText(e.target.value, MAX_CHAT_LEN))}
+            onChange={(e) => setQuestion(e.target.value)}
             onPaste={(e) => limitPasteIntoInput(e, MAX_CHAT_LEN, setQuestion)}
             maxLength={MAX_CHAT_LEN}
             placeholder={
