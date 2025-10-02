@@ -8,31 +8,6 @@ import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AnswerDisplay from "../components/AnswerDisplay"; // Markdown-rendered answer card
 
-// ---- Input guards ----------------------------------------------
-const MAX_SEARCH_LEN = 160; // adjust as needed
-const MAX_CHAT_LEN = 800;   // adjust as needed
-
-// Collapse whitespace and hard-cap length
-function sanitizeText(s: string, max: number) {
-  return s.replace(/\s+/g, " ").slice(0, max).trim();
-}
-
-// Prevent overlong paste; optionally surface a message
-function limitPasteIntoInput(
-  e: React.ClipboardEvent<HTMLInputElement>,
-  max: number,
-  setValue: (v: string) => void,
-  setMessage?: (v: string | null) => void,
-) {
-  const pasted = e.clipboardData.getData("text") ?? "";
-  if (pasted.length > max) {
-    e.preventDefault();
-    const clipped = sanitizeText(pasted, max);
-    setValue(clipped);
-    setMessage?.(`Pasted text was too long; truncated to ${max} characters.`);
-  }
-}
-
 // ===== API base & helper =====
 const ABS_API = (process.env.NEXT_PUBLIC_API_URL || "").trim();
 const apiUrl = (path: string) =>
@@ -209,13 +184,8 @@ function PageBody() {
 
   // ----- Run a search against /search -----
   async function doSearch(qStr?: string) {
-    const raw = qStr ?? query;
-    const q = sanitizeText(raw, MAX_SEARCH_LEN);
+    const q = (qStr ?? query).trim();
     if (!q) return;
-
-    if (raw.length > MAX_SEARCH_LEN) {
-      setErrorMsg(`Search limited to ${MAX_SEARCH_LEN} characters.`);
-    }
 
     writeUrl({ q, doc: null });
 
@@ -326,9 +296,7 @@ function PageBody() {
               id="q"
               ref={searchBoxRef}
               value={query}
-              onChange={(e) => setQuery(sanitizeText(e.target.value, MAX_SEARCH_LEN))}
-              onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
-              maxLength={MAX_SEARCH_LEN}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder="Type to search… (Cmd/Ctrl+/ to focus)"
               className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
               autoComplete="off"
@@ -360,7 +328,7 @@ function PageBody() {
 
         {results.length > 0 ? (
           <div className="mt-6 space-y-3">
-            <SectionTitle>📑 Search Results</SectionTitle>
+            <SectionTitle>🔍 Search Results</SectionTitle>
             <ul className="space-y-3">
               {results.map((hit, idx) => {
                 const docId = (hit.doc_id ?? hit.id) as number | string | undefined;
@@ -425,7 +393,7 @@ function PageBody() {
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
                                 onClick={() => window.open(apiUrl(`/doc/${docId}/pdf`), "_blank")}
                               >
-                                📄 View Judgement
+                                📜 View Judgment
                               </button>
                             </div>
                           )}
@@ -462,7 +430,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// ChatPanel (unchanged from your working version, with input guards)
+// ChatPanel (unchanged from your working version)
 // ============================================================================
 function ChatPanel({
   selectedDoc,
@@ -506,7 +474,7 @@ function ChatPanel({
   }
 
   async function ask() {
-    const q = sanitizeText(question, MAX_CHAT_LEN);
+    const q = question.trim();
     if (!q) return;
 
     askAbortRef.current?.abort();
@@ -672,9 +640,7 @@ function ChatPanel({
           <input
             id="chat-question-input"
             value={question}
-            onChange={(e) => setQuestion(sanitizeText(e.target.value, MAX_CHAT_LEN))}
-            onPaste={(e) => limitPasteIntoInput(e, MAX_CHAT_LEN, setQuestion)}
-            maxLength={MAX_CHAT_LEN}
+            onChange={(e) => setQuestion(e.target.value)}
             placeholder={
               lastQuestion
                 ? "Enter another question about this judgment…"
