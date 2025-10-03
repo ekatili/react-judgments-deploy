@@ -3,9 +3,9 @@
 /**
  * Next.js (App Router) page — Tanzania Judgments Explorer (Pro UX)
  * - Mobile-safe PDF drawer (iOS + Android):
- *   * scrollable wrapper with momentum scrolling
- *   * iOS uses <object type="application/pdf"> fallback
- *   * Android WebViews/Firefox get a runtime fallback (open in new tab)
+ *   * iOS uses <embed type="application/pdf"> inside a scrollable wrapper (fixes “first page only” bug)
+ *   * Android Chrome uses <iframe>; Android WebViews/Firefox fall back to “Open in new tab”
+ * - Wrapper owns scrolling with momentum + safe overscroll
  * - Uses dynamic viewport units (svh/dvh) to avoid 100vh bugs
  * - Smooth focus/scroll behavior for the chat panel
  */
@@ -114,18 +114,20 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
  */
 export default function Page() {
   return (
-    <Suspense fallback={
-      <main className="min-h-screen min-h-[100svh] min-h-[100dvh] bg-slate-950 text-slate-200">
-        <div className="mx-auto max-w-5xl p-6">Loading…</div>
-      </main>
-    }>
+    <Suspense
+      fallback={
+        <main className="min-h-screen min-h-[100svh] min-h-[100dvh] bg-slate-950 text-slate-200">
+          <div className="mx-auto max-w-5xl p-6">Loading…</div>
+        </main>
+      }
+    >
       <PageBody />
     </Suspense>
   );
 }
 
 // ============================================================================
-// PageBody() — the original page content (uses useSearchParams)
+// PageBody() — the page content (uses useSearchParams)
 // ============================================================================
 function PageBody() {
   const router = useRouter();
@@ -150,13 +152,7 @@ function PageBody() {
   const pdfPanelRef = React.useRef<HTMLDivElement>(null);
 
   // --- Search guidance examples & rotating hint ---
-  const EXAMPLES = [
-    "Tundu Lissu",
-    "land disputes",
-    "Judge Mchome",
-    "robbery with violence",
-    "election petition",
-  ];
+  const EXAMPLES = ["Tundu Lissu", "land disputes", "Judge Mchome", "robbery with violence", "election petition"];
   const [hintIndex, setHintIndex] = React.useState(0);
 
   // ----- Refs -----
@@ -207,7 +203,9 @@ function PageBody() {
       setExpandedSet(new Set());
       return;
     }
-    const handle = setTimeout(() => { void doSearch(query); }, 300);
+    const handle = setTimeout(() => {
+      void doSearch(query);
+    }, 300);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
@@ -251,7 +249,9 @@ function PageBody() {
     if (!el) return;
     try {
       el.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest", ...opts });
-    } catch { /* no-op */ }
+    } catch {
+      /* no-op */
+    }
     // Fallback + extra nudge (mobile address bar / keyboard shifts)
     const se = document.scrollingElement || document.documentElement;
     setTimeout(() => {
@@ -413,7 +413,6 @@ function PageBody() {
               ⚖️ Tanzania Judgments Explorer
             </span>
           </h1>
-          <p className="mt-2 text-slate-300/90">Search Tanzania court judgments instantly — by keyword, party, or judge.</p>
         </div>
 
         {reachable === false && <Banner>Backend API is not reachable. Make sure FastAPI is running.</Banner>}
@@ -428,7 +427,9 @@ function PageBody() {
             role="search"
             aria-label="Search judgments"
           >
-            <label className="sr-only" htmlFor="q">Search judgments</label>
+            <label className="sr-only" htmlFor="q">
+              Search judgments
+            </label>
             <input
               id="q"
               ref={searchBoxRef}
@@ -534,10 +535,7 @@ function PageBody() {
                               <button
                                 className="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-3 py-2 text-sm font-medium text-cyan-950 hover:bg-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-300"
                                 onClick={() =>
-                                  handleSelectDoc(
-                                    Number(docId),
-                                    meta?.case_line || hit.case_line || `Doc ${docId}`
-                                  )
+                                  handleSelectDoc(Number(docId), meta?.case_line || hit.case_line || `Doc ${docId}`)
                                 }
                               >
                                 💬 Chat with this judgment
@@ -552,10 +550,7 @@ function PageBody() {
                                     window.open(apiUrl(`/doc/${docId}/pdf`), "_blank");
                                     return;
                                   }
-                                  handleOpenPdf(
-                                    Number(docId),
-                                    meta?.case_line || hit.case_line || `Doc ${docId}`
-                                  );
+                                  handleOpenPdf(Number(docId), meta?.case_line || hit.case_line || `Doc ${docId}`);
                                 }}
                               >
                                 📄 View Judgement
@@ -597,9 +592,7 @@ function PageBody() {
             {/* Header tab */}
             <div className="mx-auto max-w-5xl px-4">
               <div className="mb-1 inline-flex items-center gap-2 rounded-t-xl border border-slate-700 bg-slate-900 px-3 py-2 shadow-lg">
-                <span className="text-sm font-medium text-slate-100 truncate max-w-[70vw]">
-                  📄 {pdfPanel.title}
-                </span>
+                <span className="text-sm font-medium text-slate-100 truncate max-w-[70vw]">📄 {pdfPanel.title}</span>
                 <button
                   onClick={handleClosePdf}
                   className="ml-2 inline-flex items-center gap-1 rounded-md bg-red-600 hover:bg-red-500 active:bg-red-700 text-white px-2.5 py-1 text-xs font-medium shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
@@ -617,29 +610,23 @@ function PageBody() {
                 className={[
                   // dynamic viewport height avoids mobile address bar issues
                   "h-[45svh] w-full rounded-xl border border-slate-700 bg-slate-900 shadow-2xl",
-                  // make the container itself scrollable on mobile
+                  // the container owns scrolling (important for iOS)
                   "overflow-auto md:overflow-hidden",
-                  // iOS momentum scrolling + reduce overscroll chaining
+                  // momentum scrolling + avoid overscroll chaining on iOS
                   "[-webkit-overflow-scrolling:touch] [overscroll-behavior:contain]",
+                  // ensure touch gestures are allowed to pan vertically
+                  "[touch-action:pan-y] md:[touch-action:auto]",
                 ].join(" ")}
               >
-                {/* iOS gets <object>; Android decides at runtime */}
                 {env.isIOS ? (
-                  <object
-                    data={`${pdfPanel.url}#toolbar=1&navpanes=0`}
+                  // iOS: use <embed> for reliable multi-page scrolling inside scrollable wrapper
+                  <embed
+                    src={`${pdfPanel.url}#toolbar=1&navpanes=0`}
                     type="application/pdf"
                     className="block h-full w-full"
-                    aria-label={pdfPanel.title}
-                  >
-                    {/* Fallback inside object (older engines) */}
-                    <iframe
-                      title={pdfPanel.title}
-                      src={`${pdfPanel.url}#toolbar=1&navpanes=0`}
-                      className="block h-full w-full"
-                      scrolling="yes"
-                    />
-                  </object>
+                  />
                 ) : env.inlinePdfLikelySupported ? (
+                  // Android Chrome & desktop: native viewer in iframe is fine
                   <iframe
                     key={pdfPanel.url}
                     title={pdfPanel.title}
@@ -648,11 +635,9 @@ function PageBody() {
                     scrolling="yes"
                   />
                 ) : (
-                  // Fallback for Android WebView / Firefox Android (no inline PDF)
+                  // Fallback for Firefox Android / WebViews (no inline PDF)
                   <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-slate-200">
-                    <p className="text-sm opacity-80">
-                      This browser can’t display PDFs inline. Open full screen:
-                    </p>
+                    <p className="text-sm opacity-80">This browser can’t display PDFs inline. Open full screen:</p>
                     <div className="flex gap-2">
                       <a
                         href={pdfPanel.url}
@@ -662,7 +647,7 @@ function PageBody() {
                       >
                         Open in new tab
                       </a>
-                      {/* Optional: wire a PDF.js route if you add one */}
+                      {/* Optional: add a PDF.js viewer route if desired */}
                       {/* <a
                         href={`/pdfjs?file=${encodeURIComponent(pdfPanel.url)}`}
                         className="rounded-md border border-slate-600 px-3 py-2 hover:bg-slate-800"
@@ -771,7 +756,7 @@ function ChatPanel({
       );
       const newChunks: ChatChunk[] =
         isObject(j) && Array.isArray((j as Record<string, unknown>).chunks)
-          ? ((j as { chunks: ChatChunk[] }).chunks)
+          ? (j as { chunks: ChatChunk[] }).chunks
           : [];
 
       setAnswer(cleaned);
@@ -810,7 +795,11 @@ function ChatPanel({
                 const cardId = `qa-${item.ts}`;
                 return (
                   <li key={item.ts}>
-                    <article className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${isOpen ? "shadow-lg" : ""}`}>
+                    <article
+                      className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${
+                        isOpen ? "shadow-lg" : ""
+                      }`}
+                    >
                       <button
                         className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left"
                         onClick={() => toggleHistory(item.ts)}
@@ -926,7 +915,9 @@ function ChatPanel({
             }}
           />
           <div className="flex items-center gap-3">
-            <label className="text-xs text-indigo-200" htmlFor="k-range">k</label>
+            <label className="text-xs text-indigo-200" htmlFor="k-range">
+              k
+            </label>
             <input
               id="k-range"
               type="range"
