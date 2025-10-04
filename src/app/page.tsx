@@ -142,10 +142,6 @@ function PageBody() {
   const [selectedDoc, setSelectedDoc] = React.useState<{ id: number; label: string } | null>(null);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
-  // --- ADD: PDF drawer state + ref ---
-  const [pdfPanel, setPdfPanel] = React.useState<{ url: string; title: string } | null>(null);
-  const pdfPanelRef = React.useRef<HTMLDivElement>(null);
-
   // --- Search guidance examples & rotating hint ---
   const EXAMPLES = [
     "Tundu Lissu",
@@ -227,45 +223,6 @@ function PageBody() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // --- ADD: close PDF drawer with Esc ---
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPdfPanel(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // --- FIX: reliably scroll to the drawer on mobile when it opens ---
-  React.useEffect(() => {
-    if (!pdfPanel) return;
-    const el = pdfPanelRef.current;
-    if (!el) return;
-
-    // Primary smooth scroll
-    el.scrollIntoView({ behavior: "smooth", block: "end" });
-
-    // Mobile/iOS fallback nudges after layout settles
-    const t1 = window.setTimeout(() => {
-      try {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-      } catch {}
-    }, 60);
-
-    const t2 = window.setTimeout(() => {
-      try {
-        const rect = el.getBoundingClientRect();
-        const y = rect.top + window.scrollY - 12; // small offset
-        window.scrollTo({ top: y, behavior: "smooth" });
-      } catch {}
-    }, 120);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [pdfPanel]);
-
   // ----- Helper: write certain keys back into the URL (q, doc) -----
   function writeUrl(params: Record<string, string | null | undefined>) {
     const cur = new URLSearchParams(sp.toString());
@@ -317,7 +274,7 @@ function PageBody() {
         setErrorMsg(msg);
       }
     } finally {
-      if (searchAbortRef.current === ac) searchAbortRef.current = null;
+      if (searchAbortRef.current === ac) askAbortRef.current = null;
       setIsSearching(false);
     }
   }
@@ -373,21 +330,6 @@ function PageBody() {
       const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
       if (inp) setTimeout(() => inp.focus(), 250);
     });
-  }
-
-  // --- open/close handlers for PDF drawer ---
-  function handleOpenPdf(docId: number | string, title: string, e?: React.MouseEvent<HTMLButtonElement>) {
-    // Power user: open in new tab if Ctrl/Cmd pressed
-    if (e && (e.ctrlKey || e.metaKey)) {
-      window.open(apiUrl(`/doc/${docId}/pdf`), "_blank");
-      return;
-    }
-    const url = apiUrl(`/doc/${docId}/pdf`);
-    setPdfPanel({ url, title });
-    // actual scrolling is handled in the pdfPanel useEffect (fix for mobile)
-  }
-  function handleClosePdf() {
-    setPdfPanel(null);
   }
 
   return (
@@ -532,13 +474,11 @@ function PageBody() {
 
                               <button
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
-                                onClick={(e) =>
-                                  handleOpenPdf(
-                                    Number(docId),
-                                    meta?.case_line || hit.case_line || `Doc ${docId}`,
-                                    e
-                                  )
-                                }
+                                onClick={(e) => {
+                                  // Open PDF in a new tab (desktop & mobile)
+                                  e.preventDefault();
+                                  window.open(apiUrl(`/doc/${docId}/pdf`), "_blank");
+                                }}
                               >
                                 📄 View Judgement
                               </button>
@@ -567,53 +507,6 @@ function PageBody() {
                 writeUrl({ doc: null });
               }}
             />
-          </div>
-        )}
-
-        {/* --- Anchor for smooth scroll to the drawer --- */}
-        <div ref={pdfPanelRef} />
-
-        {/* --- Bottom PDF drawer (fixed) --- */}
-        {pdfPanel && (
-          <div role="region" aria-label="Judgment PDF viewer" className="fixed inset-x-0 bottom-0 z-40">
-            {/* Header tab */}
-            <div className="mx-auto max-w-5xl px-4">
-              <div className="mb-1 inline-flex items-center gap-2 rounded-t-xl border border-slate-700 bg-slate-900 px-3 py-2 shadow-lg">
-                <span className="text-sm font-medium text-slate-100 truncate max-w-[70vw]">
-                  📄 {pdfPanel.title}
-                </span>
-                <button
-                  onClick={handleClosePdf}
-                  className="ml-2 inline-flex items-center gap-1 rounded-md border border-rose-600 bg-rose-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
-                  aria-label="Close PDF"
-                  title="Close PDF (Esc)"
-                >
-                  <span className="text-base leading-none">✕</span>
-                  <span>Close</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Drawer body */}
-            <div className="mx-auto max-w-5xl px-4">
-              <div className="h-[45vh] w-full overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
-                <iframe
-                  title={pdfPanel.title}
-                  src={`${pdfPanel.url}#toolbar=1&navpanes=0&scrollbar=1`}
-                  className="h-full w-full"
-                />
-              </div>
-
-              <div className="mt-2 mb-3 flex items-center justify-between text-xs text-slate-400">
-                <span>Tip: Ctrl/Cmd+Click “View Judgement” to open in a new browser tab.</span>
-                <button
-                  onClick={handleClosePdf}
-                  className="inline-flex items-center gap-1 rounded-md border border-rose-600 bg-rose-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-rose-500"
-                >
-                  ✕ Close
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
