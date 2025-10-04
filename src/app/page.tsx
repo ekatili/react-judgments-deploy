@@ -2,21 +2,18 @@
 
 /**
  * Next.js (App Router) page — Tanzania Judgments Explorer (Pro UX)
- * – Mobile-safe scrolling: scroll actual chat panel, not a bottom sentinel
- * – Defer focus to avoid keyboard-jank on iOS
- * – Use dynamic viewport height units to avoid 100vh bugs
- * – Add drawer spacer so fixed PDF panel doesn’t cover content on small screens
+ * Adds rotating placeholder guidance + clickable example chips.
  */
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+// SAFETY: avoid SSR issues if AnswerDisplay uses browser-only APIs
 import dynamic from "next/dynamic";
-
 const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
 
 // ---- Input guards ----------------------------------------------
-const MAX_SEARCH_LEN = 160;
-const MAX_CHAT_LEN = 800;
+const MAX_SEARCH_LEN = 160; // adjust as needed
+const MAX_CHAT_LEN = 800; // adjust as needed
 
 // Collapse whitespace and hard-cap length
 function sanitizeText(s: string, max: number) {
@@ -112,7 +109,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
  */
 export default function Page() {
   return (
-    <Suspense fallback={<main className="min-h-screen min-h-[100svh] min-h-[100dvh] bg-slate-950 text-slate-200"><div className="mx-auto max-w-5xl p-6">Loading…</div></main>}>
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-950 text-slate-200">
+          <div className="mx-auto max-w-5xl p-6">Loading…</div>
+        </main>
+      }
+    >
       <PageBody />
     </Suspense>
   );
@@ -139,7 +142,7 @@ function PageBody() {
   const [selectedDoc, setSelectedDoc] = React.useState<{ id: number; label: string } | null>(null);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
-  // --- PDF drawer state + ref ---
+  // --- ADD: PDF drawer state + ref ---
   const [pdfPanel, setPdfPanel] = React.useState<{ url: string; title: string } | null>(null);
   const pdfPanelRef = React.useRef<HTMLDivElement>(null);
 
@@ -224,7 +227,7 @@ function PageBody() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // --- Close PDF drawer with Esc ---
+  // --- ADD: close PDF drawer with Esc ---
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setPdfPanel(null);
@@ -232,6 +235,36 @@ function PageBody() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // --- FIX: reliably scroll to the drawer on mobile when it opens ---
+  React.useEffect(() => {
+    if (!pdfPanel) return;
+    const el = pdfPanelRef.current;
+    if (!el) return;
+
+    // Primary smooth scroll
+    el.scrollIntoView({ behavior: "smooth", block: "end" });
+
+    // Mobile/iOS fallback nudges after layout settles
+    const t1 = window.setTimeout(() => {
+      try {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch {}
+    }, 60);
+
+    const t2 = window.setTimeout(() => {
+      try {
+        const rect = el.getBoundingClientRect();
+        const y = rect.top + window.scrollY - 12; // small offset
+        window.scrollTo({ top: y, behavior: "smooth" });
+      } catch {}
+    }, 120);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [pdfPanel]);
 
   // ----- Helper: write certain keys back into the URL (q, doc) -----
   function writeUrl(params: Record<string, string | null | undefined>) {
@@ -244,29 +277,12 @@ function PageBody() {
     router.replace(qs ? `/?${qs}` : "/");
   }
 
-  // ----- Robust scroll helper (works across mobile/desktop) -----
-  function smartScrollTo(el: Element | null, opts?: ScrollIntoViewOptions) {
-    if (!el) return;
-    try {
-      el.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest", ...opts });
-    } catch {
-      // no-op
-    }
-    // Fallback (and extra nudge for iOS after address bar/keyboard shifts)
-    const se = document.scrollingElement || document.documentElement;
-    setTimeout(() => {
-      const rect = (el as HTMLElement).getBoundingClientRect();
-      const top = rect.top + (window.pageYOffset || document.documentElement.scrollTop) - 8;
-      se?.scrollTo({ top, behavior: "smooth" });
-    }, 160);
-  }
-
   // ----- Run a search against /search -----
   async function doSearch(qStr?: string) {
     const raw = qStr ?? query;
 
     // strict sanitize ONLY here (do NOT re-declare q twice)
-    const q = sanitizeText(raw, MAX_SEARCH_LEN);
+    const q = sanitizeText(raw, MAX_SEARCH_LEN); // collapses whitespace + trims ends
     if (!q) return;
 
     if (raw.length > MAX_SEARCH_LEN) {
@@ -352,35 +368,30 @@ function PageBody() {
     setSelectedDoc({ id, label });
     writeUrl({ doc: String(id) });
 
-    // Wait for ChatPanel to mount and paint, then scroll the *chat panel* (not the empty sentinel).
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        smartScrollTo(chatPanelRef.current ?? pageEndRef.current, { block: "start" });
-        // Avoid keyboard/viewport fighting the scroll: delay focus slightly more on mobile.
-        setTimeout(() => {
-          const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
-          inp?.focus();
-        }, 350);
-      });
+      pageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
+      if (inp) setTimeout(() => inp.focus(), 250);
     });
   }
 
   // --- open/close handlers for PDF drawer ---
-  function handleOpenPdf(docId: number | string, title: string) {
+  function handleOpenPdf(docId: number | string, title: string, e?: React.MouseEvent<HTMLButtonElement>) {
+    // Power user: open in new tab if Ctrl/Cmd pressed
+    if (e && (e.ctrlKey || e.metaKey)) {
+      window.open(apiUrl(`/doc/${docId}/pdf`), "_blank");
+      return;
+    }
     const url = apiUrl(`/doc/${docId}/pdf`);
     setPdfPanel({ url, title });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        smartScrollTo(pdfPanelRef.current, { block: "start" });
-      });
-    });
+    // actual scrolling is handled in the pdfPanel useEffect (fix for mobile)
   }
   function handleClosePdf() {
     setPdfPanel(null);
   }
 
   return (
-    <main className="min-h-screen min-h-[100svh] min-h-[100dvh] bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
+    <main className="min-h-screen bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
       <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500" />
       <div className="mx-auto max-w-5xl px-4 py-8 md:py-10">
         <div className="mb-6">
@@ -409,7 +420,7 @@ function PageBody() {
               id="q"
               ref={searchBoxRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setQuery(e.target.value)} // allow natural typing; sanitize on submit
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
               placeholder={`Type to search… e.g. ${EXAMPLES[hintIndex]} (Cmd/Ctrl+/ to focus)`}
@@ -521,18 +532,13 @@ function PageBody() {
 
                               <button
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  // Open new tab if Ctrl/Cmd pressed
-                                  if (e.ctrlKey || e.metaKey) {
-                                    window.open(apiUrl(`/doc/${docId}/pdf`), "_blank");
-                                    return;
-                                  }
+                                onClick={(e) =>
                                   handleOpenPdf(
                                     Number(docId),
-                                    meta?.case_line || hit.case_line || `Doc ${docId}`
-                                  );
-                                }}
+                                    meta?.case_line || hit.case_line || `Doc ${docId}`,
+                                    e
+                                  )
+                                }
                               >
                                 📄 View Judgement
                               </button>
@@ -552,7 +558,7 @@ function PageBody() {
         )}
 
         {selectedDoc && (
-          <div ref={chatPanelRef} id="chat-panel-anchor">
+          <div ref={chatPanelRef}>
             <ChatPanel
               key={`chat-${selectedDoc.id}`}
               selectedDoc={selectedDoc}
@@ -564,10 +570,10 @@ function PageBody() {
           </div>
         )}
 
-        {/* Anchor for smooth scroll to the drawer */}
+        {/* --- Anchor for smooth scroll to the drawer --- */}
         <div ref={pdfPanelRef} />
 
-        {/* Bottom PDF drawer (fixed) */}
+        {/* --- Bottom PDF drawer (fixed) --- */}
         {pdfPanel && (
           <div role="region" aria-label="Judgment PDF viewer" className="fixed inset-x-0 bottom-0 z-40">
             {/* Header tab */}
@@ -578,11 +584,12 @@ function PageBody() {
                 </span>
                 <button
                   onClick={handleClosePdf}
-                  className="ml-2 inline-flex items-center gap-1 rounded-md bg-red-600 hover:bg-red-500 active:bg-red-700 text-white px-2.5 py-1 text-xs font-medium shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                  className="ml-2 inline-flex items-center gap-1 rounded-md border border-rose-600 bg-rose-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
                   aria-label="Close PDF"
                   title="Close PDF (Esc)"
                 >
-                  ✕ Close
+                  <span className="text-base leading-none">✕</span>
+                  <span>Close</span>
                 </button>
               </div>
             </div>
@@ -601,7 +608,7 @@ function PageBody() {
                 <span>Tip: Ctrl/Cmd+Click “View Judgement” to open in a new browser tab.</span>
                 <button
                   onClick={handleClosePdf}
-                  className="inline-flex items-center gap-1 rounded-md bg-red-600 hover:bg-red-500 active:bg-red-700 text-white px-3 py-1.5 font-medium shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                  className="inline-flex items-center gap-1 rounded-md border border-rose-600 bg-rose-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-rose-500"
                 >
                   ✕ Close
                 </button>
@@ -610,9 +617,6 @@ function PageBody() {
           </div>
         )}
 
-        {/* Spacer so fixed drawer doesn't cover content on small screens */}
-        {pdfPanel && <div aria-hidden className="h-[46vh]" />}
-
         <div ref={pageEndRef} />
       </div>
     </main>
@@ -620,7 +624,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// ChatPanel (same features, mobile-friendly input + guards)
+// ChatPanel (unchanged from your working version, with input guards)
 // ============================================================================
 function ChatPanel({
   selectedDoc,
@@ -694,7 +698,7 @@ function ChatPanel({
       );
       const newChunks: ChatChunk[] =
         isObject(j) && Array.isArray((j as Record<string, unknown>).chunks)
-          ? ((j as { chunks: ChatChunk[] }).chunks)
+          ? (j as { chunks: ChatChunk[] }).chunks
           : [];
 
       setAnswer(cleaned);
