@@ -7,13 +7,12 @@
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-// SAFETY: avoid SSR issues if AnswerDisplay uses browser-only APIs
 import dynamic from "next/dynamic";
 const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
 
 // ---- Input guards ----------------------------------------------
-const MAX_SEARCH_LEN = 160; // adjust as needed
-const MAX_CHAT_LEN = 800; // adjust as needed
+const MAX_SEARCH_LEN = 160;
+const MAX_CHAT_LEN = 800;
 
 // Collapse whitespace and hard-cap length
 function sanitizeText(s: string, max: number) {
@@ -238,8 +237,7 @@ function PageBody() {
   async function doSearch(qStr?: string) {
     const raw = qStr ?? query;
 
-    // strict sanitize ONLY here (do NOT re-declare q twice)
-    const q = sanitizeText(raw, MAX_SEARCH_LEN); // collapses whitespace + trims ends
+    const q = sanitizeText(raw, MAX_SEARCH_LEN);
     if (!q) return;
 
     if (raw.length > MAX_SEARCH_LEN) {
@@ -274,7 +272,8 @@ function PageBody() {
         setErrorMsg(msg);
       }
     } finally {
-      if (searchAbortRef.current === ac) askAbortRef.current = null;
+      // ✅ FIX: clear the correct ref that exists in this component
+      if (searchAbortRef.current === ac) searchAbortRef.current = null;
       setIsSearching(false);
     }
   }
@@ -362,7 +361,7 @@ function PageBody() {
               id="q"
               ref={searchBoxRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)} // allow natural typing; sanitize on submit
+              onChange={(e) => setQuery(e.target.value)}
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
               placeholder={`Type to search… e.g. ${EXAMPLES[hintIndex]} (Cmd/Ctrl+/ to focus)`}
@@ -475,7 +474,6 @@ function PageBody() {
                               <button
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
                                 onClick={(e) => {
-                                  // Open PDF in a new tab (desktop & mobile)
                                   e.preventDefault();
                                   window.open(apiUrl(`/doc/${docId}/pdf`), "_blank");
                                 }}
@@ -517,7 +515,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// ChatPanel (unchanged from your working version, with input guards)
+// ChatPanel
 // ============================================================================
 function ChatPanel({
   selectedDoc,
