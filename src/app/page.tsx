@@ -13,7 +13,7 @@ const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr
 
 // ---- Input guards ----------------------------------------------
 const MAX_SEARCH_LEN = 160; // adjust as needed
-const MAX_CHAT_LEN = 800; // adjust as needed
+const MAX_CHAT_LEN = 800;   // adjust as needed
 
 // Collapse whitespace and hard-cap length
 function sanitizeText(s: string, max: number) {
@@ -25,7 +25,7 @@ function limitPasteIntoInput(
   e: React.ClipboardEvent<HTMLInputElement>,
   max: number,
   setValue: (v: string) => void,
-  setMessage?: (v: string | null) => void
+  setMessage?: (v: string | null) => void,
 ) {
   const pasted = e.clipboardData.getData("text") ?? "";
   if (pasted.length > max) {
@@ -104,18 +104,18 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="text-lg font-semibold tracking-tight text-slate-100">{children}</h2>;
 }
 
+// Touch detection (skip focusing input on mobile to avoid keyboard fighting the scroll)
+function isTouchDevice() {
+  if (typeof window === "undefined") return false;
+  return "ontouchstart" in window || navigator.maxTouchPoints > 0;
+}
+
 /**
  * Exported page: wraps the body in Suspense so useSearchParams() is legal at build time.
  */
 export default function Page() {
   return (
-    <Suspense
-      fallback={
-        <main className="min-h-screen bg-slate-950 text-slate-200">
-          <div className="mx-auto max-w-5xl p-6">Loading…</div>
-        </main>
-      }
-    >
+    <Suspense fallback={<main className="min-h-screen bg-slate-950 text-slate-200"><div className="mx-auto max-w-5xl p-6">Loading…</div></main>}>
       <PageBody />
     </Suspense>
   );
@@ -143,7 +143,13 @@ function PageBody() {
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
   // --- Search guidance examples & rotating hint ---
-  const EXAMPLES = ["Tundu Lissu", "land disputes", "Judge Mchome ", "robbery with violence", "election petition"];
+  const EXAMPLES = [
+    "Tundu Lissu",
+    "land disputes",
+    "Judge Mchome ",
+    "robbery with violence",
+    "election petition",
+  ];
   const [hintIndex, setHintIndex] = React.useState(0);
 
   // ----- Refs -----
@@ -233,7 +239,7 @@ function PageBody() {
     const raw = qStr ?? query;
 
     // strict sanitize ONLY here (do NOT re-declare q twice)
-    const q = sanitizeText(raw, MAX_SEARCH_LEN); // collapses whitespace + trims ends
+    const q = sanitizeText(raw, MAX_SEARCH_LEN);  // collapses whitespace + trims ends
     if (!q) return;
 
     if (raw.length > MAX_SEARCH_LEN) {
@@ -318,13 +324,32 @@ function PageBody() {
   function handleSelectDoc(id: number, label: string) {
     setSelectedDoc({ id, label });
     writeUrl({ doc: String(id) });
-
-    requestAnimationFrame(() => {
-      pageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-      const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
-      if (inp) setTimeout(() => inp.focus(), 250);
-    });
+    // NOTE: we no longer scroll here; see the useEffect below that runs *after* render.
   }
+
+  // --- RELIABLE MOBILE SCROLL: after selectedDoc renders, scroll & (optionally) focus
+  React.useEffect(() => {
+    if (!selectedDoc) return;
+    const el = chatPanelRef.current ?? pageEndRef.current;
+    if (!el) return;
+
+    // Try a few times to beat layout/keyboard timings on mobile
+    const delays = [0, 120, 350];
+    delays.forEach((d) => {
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, d);
+    });
+
+    // Only focus the input on non-touch devices (mobile keyboard fights the scroll)
+    if (!isTouchDevice()) {
+      const focusDelay = 380;
+      setTimeout(() => {
+        const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
+        inp?.focus();
+      }, focusDelay);
+    }
+  }, [selectedDoc]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
@@ -351,9 +376,7 @@ function PageBody() {
             role="search"
             aria-label="Search judgments"
           >
-            <label className="sr-only" htmlFor="q">
-              Search judgments
-            </label>
+            <label className="sr-only" htmlFor="q">Search judgments</label>
             <input
               id="q"
               ref={searchBoxRef}
@@ -393,7 +416,12 @@ function PageBody() {
           <div className="mt-3 text-sm text-slate-300/80 flex flex-wrap items-center gap-2">
             <span className="opacity-70">Try:</span>
             {EXAMPLES.slice(0, 4).map((ex, i) => (
-              <button key={i} type="button" onClick={() => pickExample(ex)} className="rounded-full bg-slate-800 hover:bg-slate-700 px-3 py-1">
+              <button
+                key={i}
+                type="button"
+                onClick={() => pickExample(ex)}
+                className="rounded-full bg-slate-800 hover:bg-slate-700 px-3 py-1"
+              >
                 {ex}
               </button>
             ))}
@@ -454,32 +482,26 @@ function PageBody() {
                               <button
                                 className="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-3 py-2 text-sm font-medium text-cyan-950 hover:bg-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-300"
                                 onClick={() =>
-                                  handleSelectDoc(Number(docId), meta?.case_line || hit.case_line || `Doc ${docId}`)
+                                  handleSelectDoc(
+                                    Number(docId),
+                                    meta?.case_line || hit.case_line || `Doc ${docId}`
+                                  )
                                 }
                               >
                                 💬 Chat with this judgment
                               </button>
 
-                              {/* Updated: select & scroll first, then open PDF (mobile-safe) */}
                               <button
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  const label = meta?.case_line || hit.case_line || `Doc ${docId}`;
-                                  // 1) Select doc & trigger scroll
-                                  handleSelectDoc(Number(docId), label);
-
-                                  // 2) Open PDF in new tab; delay slightly on mobile so scroll starts
-                                  const href = apiUrl(`/doc/${docId}/pdf`);
-                                  const openPdf = () => window.open(href, "_blank", "noopener");
-
-                                  const isMobile =
-                                    /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 768;
-
-                                  if (isMobile) {
-                                    setTimeout(openPdf, 350);
+                                  const url = apiUrl(`/doc/${docId}/pdf`);
+                                  // Power users: new tab if Ctrl/Cmd
+                                  if (e.ctrlKey || e.metaKey) {
+                                    window.open(url, "_blank");
                                   } else {
-                                    openPdf();
+                                    // Mobile-friendly: just navigate current tab
+                                    window.location.href = url;
                                   }
                                 }}
                               >
@@ -594,7 +616,7 @@ function ChatPanel({
       );
       const newChunks: ChatChunk[] =
         isObject(j) && Array.isArray((j as Record<string, unknown>).chunks)
-          ? (j as { chunks: ChatChunk[] }).chunks
+          ? ((j as { chunks: ChatChunk[] }).chunks)
           : [];
 
       setAnswer(cleaned);
@@ -633,11 +655,7 @@ function ChatPanel({
                 const cardId = `qa-${item.ts}`;
                 return (
                   <li key={item.ts}>
-                    <article
-                      className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${
-                        isOpen ? "shadow-lg" : ""
-                      }`}
-                    >
+                    <article className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${isOpen ? "shadow-lg" : ""}`}>
                       <button
                         className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left"
                         onClick={() => toggleHistory(item.ts)}
@@ -753,9 +771,7 @@ function ChatPanel({
             }}
           />
           <div className="flex items-center gap-3">
-            <label className="text-xs text-indigo-200" htmlFor="k-range">
-              k
-            </label>
+            <label className="text-xs text-indigo-200" htmlFor="k-range">k</label>
             <input
               id="k-range"
               type="range"
