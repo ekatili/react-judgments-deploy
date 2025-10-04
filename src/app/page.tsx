@@ -2,23 +2,18 @@
 
 /**
  * Next.js (App Router) page — Tanzania Judgments Explorer (Pro UX)
- * - Mobile-safe PDF drawer (iOS + Android):
- *   * iOS uses <embed type="application/pdf"> inside a scrollable wrapper (fixes “first page only” bug)
- *   * Android Chrome uses <iframe>; Android WebViews/Firefox fall back to “Open in new tab”
- * - Wrapper owns scrolling with momentum + safe overscroll
- * - Uses dynamic viewport units (svh/dvh) to avoid 100vh bugs
- * - Smooth focus/scroll behavior for the chat panel
+ * Adds rotating placeholder guidance + clickable example chips.
  */
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+// SAFETY: avoid SSR issues if AnswerDisplay uses browser-only APIs
 import dynamic from "next/dynamic";
-
 const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
 
 // ---- Input guards ----------------------------------------------
-const MAX_SEARCH_LEN = 160;
-const MAX_CHAT_LEN = 800;
+const MAX_SEARCH_LEN = 160; // adjust as needed
+const MAX_CHAT_LEN = 800;   // adjust as needed
 
 // Collapse whitespace and hard-cap length
 function sanitizeText(s: string, max: number) {
@@ -114,20 +109,14 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
  */
 export default function Page() {
   return (
-    <Suspense
-      fallback={
-        <main className="min-h-screen min-h-[100svh] min-h-[100dvh] bg-slate-950 text-slate-200">
-          <div className="mx-auto max-w-5xl p-6">Loading…</div>
-        </main>
-      }
-    >
+    <Suspense fallback={<main className="min-h-screen bg-slate-950 text-slate-200"><div className="mx-auto max-w-5xl p-6">Loading…</div></main>}>
       <PageBody />
     </Suspense>
   );
 }
 
 // ============================================================================
-// PageBody() — the page content (uses useSearchParams)
+// PageBody() — the original page content (uses useSearchParams)
 // ============================================================================
 function PageBody() {
   const router = useRouter();
@@ -147,12 +136,18 @@ function PageBody() {
   const [selectedDoc, setSelectedDoc] = React.useState<{ id: number; label: string } | null>(null);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
-  // --- PDF drawer state + ref ---
+  // --- ADD: PDF drawer state + ref ---
   const [pdfPanel, setPdfPanel] = React.useState<{ url: string; title: string } | null>(null);
   const pdfPanelRef = React.useRef<HTMLDivElement>(null);
 
   // --- Search guidance examples & rotating hint ---
-  const EXAMPLES = ["Tundu Lissu", "land disputes", "Judge Mchome", "robbery with violence", "election petition"];
+  const EXAMPLES = [
+    "Tundu Lissu",
+    "land disputes",
+    "Judge Mchome ",
+    "robbery with violence",
+    "election petition",
+  ];
   const [hintIndex, setHintIndex] = React.useState(0);
 
   // ----- Refs -----
@@ -181,7 +176,9 @@ function PageBody() {
 
   // ----- Rotate example hint every 4s -----
   React.useEffect(() => {
-    const id = setInterval(() => setHintIndex((i) => (i + 1) % EXAMPLES.length), 4000);
+    const id = setInterval(() => {
+      setHintIndex((i) => (i + 1) % EXAMPLES.length);
+    }, 4000);
     return () => clearInterval(id);
   }, []); // EXAMPLES is a stable literal
 
@@ -224,7 +221,7 @@ function PageBody() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // --- Close PDF drawer with Esc ---
+  // --- ADD: close PDF drawer with Esc ---
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setPdfPanel(null);
@@ -244,28 +241,12 @@ function PageBody() {
     router.replace(qs ? `/?${qs}` : "/");
   }
 
-  // ----- Robust scroll helper (works across mobile/desktop) -----
-  function smartScrollTo(el: Element | null, opts?: ScrollIntoViewOptions) {
-    if (!el) return;
-    try {
-      el.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest", ...opts });
-    } catch {
-      /* no-op */
-    }
-    // Fallback + extra nudge (mobile address bar / keyboard shifts)
-    const se = document.scrollingElement || document.documentElement;
-    setTimeout(() => {
-      const rect = (el as HTMLElement).getBoundingClientRect();
-      const top = rect.top + (window.pageYOffset || document.documentElement.scrollTop) - 8;
-      se?.scrollTo({ top, behavior: "smooth" });
-    }, 160);
-  }
-
   // ----- Run a search against /search -----
   async function doSearch(qStr?: string) {
     const raw = qStr ?? query;
 
-    const q = sanitizeText(raw, MAX_SEARCH_LEN);
+    // strict sanitize ONLY here (do NOT re-declare q twice)
+    const q = sanitizeText(raw, MAX_SEARCH_LEN);  // collapses whitespace + trims ends
     if (!q) return;
 
     if (raw.length > MAX_SEARCH_LEN) {
@@ -351,60 +332,27 @@ function PageBody() {
     setSelectedDoc({ id, label });
     writeUrl({ doc: String(id) });
 
-    // Wait for ChatPanel to mount and paint, then scroll the *chat panel*.
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        smartScrollTo(chatPanelRef.current ?? pageEndRef.current, { block: "start" });
-        // Avoid keyboard/viewport fighting the scroll: delay focus slightly more on mobile.
-        setTimeout(() => {
-          const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
-          inp?.focus();
-        }, 350);
-      });
+      pageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
+      if (inp) setTimeout(() => inp.focus(), 250);
     });
   }
 
-  // --- open/close handlers for PDF drawer ---
+  // --- ADD: open/close handlers for PDF drawer ---
   function handleOpenPdf(docId: number | string, title: string) {
     const url = apiUrl(`/doc/${docId}/pdf`);
     setPdfPanel({ url, title });
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        smartScrollTo(pdfPanelRef.current, { block: "start" });
-      });
+      pdfPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     });
   }
   function handleClosePdf() {
     setPdfPanel(null);
   }
 
-  // ---------- Platform detectors (client-only) ----------
-  const env = React.useMemo(() => {
-    if (typeof navigator === "undefined") {
-      return {
-        isIOS: false,
-        isAndroid: false,
-        isFirefoxAndroid: false,
-        isAndroidWebView: false,
-        inlinePdfLikelySupported: false,
-      };
-    }
-    const ua = navigator.userAgent || "";
-    const isIOSDevice = /iPad|iPhone|iPod/.test(ua);
-    const isIPadOS13Plus = /Macintosh/.test(ua) && typeof document !== "undefined" && "ontouchend" in document;
-    const isIOS = isIOSDevice || isIPadOS13Plus;
-
-    const isAndroid = /Android/i.test(ua);
-    const isFirefoxAndroid = isAndroid && /Firefox\/\d+/.test(ua);
-    const isAndroidWebView =
-      isAndroid && (/\bwv\b/.test(ua) || (!/Chrome\/\d+/.test(ua) && /Version\/\d+\.\d+/.test(ua)));
-    const inlinePdfLikelySupported = isAndroid && !isFirefoxAndroid && !isAndroidWebView;
-
-    return { isIOS, isAndroid, isFirefoxAndroid, isAndroidWebView, inlinePdfLikelySupported };
-  }, []);
-
   return (
-    <main className="min-h-screen min-h-[100svh] min-h-[100dvh] bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
+    <main className="min-h-screen bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
       <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500" />
       <div className="mx-auto max-w-5xl px-4 py-8 md:py-10">
         <div className="mb-6">
@@ -413,6 +361,7 @@ function PageBody() {
               ⚖️ Tanzania Judgments Explorer
             </span>
           </h1>
+          <p className="mt-2 text-slate-300/90">Search Tanzania court judgments instantly — by keyword, party, or judge.</p>
         </div>
 
         {reachable === false && <Banner>Backend API is not reachable. Make sure FastAPI is running.</Banner>}
@@ -427,14 +376,12 @@ function PageBody() {
             role="search"
             aria-label="Search judgments"
           >
-            <label className="sr-only" htmlFor="q">
-              Search judgments
-            </label>
+            <label className="sr-only" htmlFor="q">Search judgments</label>
             <input
               id="q"
               ref={searchBoxRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setQuery(e.target.value)} // allow natural typing; sanitize on submit
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
               placeholder={`Type to search… e.g. ${EXAMPLES[hintIndex]} (Cmd/Ctrl+/ to focus)`}
@@ -535,7 +482,10 @@ function PageBody() {
                               <button
                                 className="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-3 py-2 text-sm font-medium text-cyan-950 hover:bg-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-300"
                                 onClick={() =>
-                                  handleSelectDoc(Number(docId), meta?.case_line || hit.case_line || `Doc ${docId}`)
+                                  handleSelectDoc(
+                                    Number(docId),
+                                    meta?.case_line || hit.case_line || `Doc ${docId}`
+                                  )
                                 }
                               >
                                 💬 Chat with this judgment
@@ -545,12 +495,15 @@ function PageBody() {
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  // Open new tab if Ctrl/Cmd pressed
+                                  // Preserve power-user behavior: open new tab if Ctrl/Cmd pressed
                                   if (e.ctrlKey || e.metaKey) {
                                     window.open(apiUrl(`/doc/${docId}/pdf`), "_blank");
                                     return;
                                   }
-                                  handleOpenPdf(Number(docId), meta?.case_line || hit.case_line || `Doc ${docId}`);
+                                  handleOpenPdf(
+                                    Number(docId),
+                                    meta?.case_line || hit.case_line || `Doc ${docId}`
+                                  );
                                 }}
                               >
                                 📄 View Judgement
@@ -571,7 +524,7 @@ function PageBody() {
         )}
 
         {selectedDoc && (
-          <div ref={chatPanelRef} id="chat-panel-anchor">
+          <div ref={chatPanelRef}>
             <ChatPanel
               key={`chat-${selectedDoc.id}`}
               selectedDoc={selectedDoc}
@@ -583,18 +536,21 @@ function PageBody() {
           </div>
         )}
 
-        {/* Anchor for smooth scroll to the drawer */}
+        {/* --- ADD: anchor for smooth scroll to the drawer --- */}
         <div ref={pdfPanelRef} />
 
-        {/* Bottom PDF drawer (fixed) */}
+        {/* --- ADD: Bottom PDF drawer (fixed) --- */}
         {pdfPanel && (
           <div role="region" aria-label="Judgment PDF viewer" className="fixed inset-x-0 bottom-0 z-40">
             {/* Header tab */}
             <div className="mx-auto max-w-5xl px-4">
               <div className="mb-1 inline-flex items-center gap-2 rounded-t-xl border border-slate-700 bg-slate-900 px-3 py-2 shadow-lg">
-                <span className="text-sm font-medium text-slate-100 truncate max-w-[70vw]">📄 {pdfPanel.title}</span>
+                <span className="text-sm font-medium text-slate-100 truncate max-w-[70vw]">
+                  📄 {pdfPanel.title}
+                </span>
                 <button
                   onClick={handleClosePdf}
+                  // 🔴 Close button (header chip)
                   className="ml-2 inline-flex items-center gap-1 rounded-md bg-red-600 hover:bg-red-500 active:bg-red-700 text-white px-2.5 py-1 text-xs font-medium shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                   aria-label="Close PDF"
                   title="Close PDF (Esc)"
@@ -606,63 +562,19 @@ function PageBody() {
 
             {/* Drawer body */}
             <div className="mx-auto max-w-5xl px-4">
-              <div
-                className={[
-                  // dynamic viewport height avoids mobile address bar issues
-                  "h-[45svh] w-full rounded-xl border border-slate-700 bg-slate-900 shadow-2xl",
-                  // the container owns scrolling (important for iOS)
-                  "overflow-auto md:overflow-hidden",
-                  // momentum scrolling + avoid overscroll chaining on iOS
-                  "[-webkit-overflow-scrolling:touch] [overscroll-behavior:contain]",
-                  // ensure touch gestures are allowed to pan vertically
-                  "[touch-action:pan-y] md:[touch-action:auto]",
-                ].join(" ")}
-              >
-                {env.isIOS ? (
-                  // iOS: use <embed> for reliable multi-page scrolling inside scrollable wrapper
-                  <embed
-                    src={`${pdfPanel.url}#toolbar=1&navpanes=0`}
-                    type="application/pdf"
-                    className="block h-full w-full"
-                  />
-                ) : env.inlinePdfLikelySupported ? (
-                  // Android Chrome & desktop: native viewer in iframe is fine
-                  <iframe
-                    key={pdfPanel.url}
-                    title={pdfPanel.title}
-                    src={`${pdfPanel.url}#toolbar=1&navpanes=0&scrollbar=1`}
-                    className="block h-full w-full"
-                    scrolling="yes"
-                  />
-                ) : (
-                  // Fallback for Firefox Android / WebViews (no inline PDF)
-                  <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-slate-200">
-                    <p className="text-sm opacity-80">This browser can’t display PDFs inline. Open full screen:</p>
-                    <div className="flex gap-2">
-                      <a
-                        href={pdfPanel.url}
-                        target="_blank"
-                        rel="noopener"
-                        className="rounded-md bg-emerald-500 px-3 py-2 text-emerald-950 hover:bg-emerald-400"
-                      >
-                        Open in new tab
-                      </a>
-                      {/* Optional: add a PDF.js viewer route if desired */}
-                      {/* <a
-                        href={`/pdfjs?file=${encodeURIComponent(pdfPanel.url)}`}
-                        className="rounded-md border border-slate-600 px-3 py-2 hover:bg-slate-800"
-                      >
-                        Use built-in viewer
-                      </a> */}
-                    </div>
-                  </div>
-                )}
+              <div className="h-[45vh] w-full overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+                <iframe
+                  title={pdfPanel.title}
+                  src={`${pdfPanel.url}#toolbar=1&navpanes=0&scrollbar=1`}
+                  className="h-full w-full"
+                />
               </div>
 
               <div className="mt-2 mb-3 flex items-center justify-between text-xs text-slate-400">
-                <span>Tip: Ctrl/Cmd+Click “View Judgement” to open in a new tab.</span>
+                <span>Tip: Ctrl/Cmd+Click “View Judgement” to open in a new browser tab.</span>
                 <button
                   onClick={handleClosePdf}
+                  // 🔴 Close button (footer)
                   className="inline-flex items-center gap-1 rounded-md bg-red-600 hover:bg-red-500 active:bg-red-700 text-white px-3 py-1.5 font-medium shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                 >
                   ✕ Close
@@ -672,9 +584,6 @@ function PageBody() {
           </div>
         )}
 
-        {/* Spacer so fixed drawer doesn't cover content on small screens */}
-        {pdfPanel && <div aria-hidden className="h-[46svh]" />}
-
         <div ref={pageEndRef} />
       </div>
     </main>
@@ -682,7 +591,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// ChatPanel (same features, mobile-friendly input + guards)
+// ChatPanel (unchanged from your working version, with input guards)
 // ============================================================================
 function ChatPanel({
   selectedDoc,
@@ -756,7 +665,7 @@ function ChatPanel({
       );
       const newChunks: ChatChunk[] =
         isObject(j) && Array.isArray((j as Record<string, unknown>).chunks)
-          ? (j as { chunks: ChatChunk[] }).chunks
+          ? ((j as { chunks: ChatChunk[] }).chunks)
           : [];
 
       setAnswer(cleaned);
@@ -795,11 +704,7 @@ function ChatPanel({
                 const cardId = `qa-${item.ts}`;
                 return (
                   <li key={item.ts}>
-                    <article
-                      className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${
-                        isOpen ? "shadow-lg" : ""
-                      }`}
-                    >
+                    <article className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${isOpen ? "shadow-lg" : ""}`}>
                       <button
                         className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left"
                         onClick={() => toggleHistory(item.ts)}
@@ -915,9 +820,7 @@ function ChatPanel({
             }}
           />
           <div className="flex items-center gap-3">
-            <label className="text-xs text-indigo-200" htmlFor="k-range">
-              k
-            </label>
+            <label className="text-xs text-indigo-200" htmlFor="k-range">k</label>
             <input
               id="k-range"
               type="range"
