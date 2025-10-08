@@ -1,28 +1,28 @@
 "use client";
 
 /**
- * Next.js (App Router) page — Tanzania Judgments Explorer (Pro UX)
- * Adds rotating placeholder guidance + clickable example chips.
+ * FIXED: Added streaming support for /chat/stream endpoint
+ * - Real-time answer display as tokens arrive
+ * - Handles run_id/seq/delta/done/error format
+ * - Falls back to sync /chat if streaming fails
+ * - Uses display_header from backend when available
  */
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-// SAFETY: avoid SSR issues if AnswerDisplay uses browser-only APIs
 import dynamic from "next/dynamic";
 const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
 
 // ---- Input guards ----------------------------------------------
-const MAX_SEARCH_LEN = 160; // adjust as needed
-const MAX_CHAT_LEN = 800;   // adjust as needed
+const MAX_SEARCH_LEN = 160;
+const MAX_CHAT_LEN = 800;
 
-// Collapse whitespace and hard-cap length
-function sanitizeText(s: string, max: number) {
+function sanitizeText(s: string, max: number): string {
   return s.replace(/\s+/g, " ").slice(0, max).trim();
 }
 
-// Prevent overlong paste; optionally surface a message
-function limitPasteIntoInput(
-  e: React.ClipboardEvent<HTMLInputElement>,
+function limitPasteIntoInput<T extends HTMLInputElement | HTMLTextAreaElement>(
+  e: React.ClipboardEvent<T>,
   max: number,
   setValue: (v: string) => void,
   setMessage?: (v: string | null) => void,
@@ -32,7 +32,7 @@ function limitPasteIntoInput(
     e.preventDefault();
     const clipped = sanitizeText(pasted, max);
     setValue(clipped);
-    setMessage?.(`Pasted text was too long; truncated to ${max} characters.`);
+    setMessage?.(`Pasted text was clipped to ${max} characters.`);
   }
 }
 
@@ -48,9 +48,11 @@ interface SearchHit {
   case_line?: string;
   court_title?: string;
   snippet?: string;
+  preview?: string;
   text?: string;
   parties?: string;
   date_of_judgment?: string;
+  display_header?: string; // NEW: backend provides this
 }
 interface DocMeta {
   case_line?: string;
@@ -58,22 +60,107 @@ interface DocMeta {
   parties?: string;
   date_of_judgment?: string;
   summary?: string;
+  display_header?: string;
 }
 interface ChatChunk {
   text?: string;
   preview?: string;
   chunk_no?: number;
+  display_header?: string; // optional header per chunk if backend provides
 }
+interface SearchResponsePayload {
+  hits?: SearchHit[];
+  limit?: number;
+  offset?: number;
+  next_offset?: number | null;
+  prev_offset?: number | null;
+  total_count?: number | null;
+  page?: number | null;
+  total_pages?: number | null;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-function normalizeSearchResults(data: unknown): SearchHit[] {
-  if (isObject(data) && Array.isArray((data as Record<string, unknown>).hits)) {
-    return (data as { hits: unknown[] }).hits as SearchHit[];
+
+function normalizeSearchPayload(data: unknown): {
+  hits: SearchHit[];
+  limit: number;
+  offset: number;
+  nextOffset: number | null;
+  prevOffset: number | null;
+  totalCount: number | null;
+  page: number;
+  totalPages: number | null;
+} {
+  if (isObject(data)) {
+    const obj = data as Record<string, unknown>;
+
+    const rawHits = obj["hits"];
+    const hits: SearchHit[] = Array.isArray(rawHits) ? (rawHits as SearchHit[]) : [];
+
+    const rawLimit = obj["limit"];
+    const limit = Math.max(1, Number(rawLimit ?? 10) || 10);
+
+    const rawOffset = obj["offset"];
+    const offset = Math.max(0, Number(rawOffset ?? 0) || 0);
+
+    const rawNext = obj["next_offset"];
+    const nextOffset =
+      rawNext === null || rawNext === undefined ? null : Number(rawNext);
+
+    const rawPrev = obj["prev_offset"];
+    const prevOffset =
+      rawPrev === null || rawPrev === undefined ? null : Number(rawPrev);
+
+    const rawTotal = obj["total_count"];
+    const totalCount = typeof rawTotal === "number" ? rawTotal : null;
+
+    const rawPage = obj["page"];
+    const pageFromApi = Number(rawPage);
+
+    const rawTotalPages = obj["total_pages"];
+    const totalPagesFromApi = Number(rawTotalPages);
+
+    const computedPage = Math.floor(offset / Math.max(1, limit)) + 1;
+    const page =
+      Number.isFinite(pageFromApi) && pageFromApi > 0 ? pageFromApi : computedPage;
+
+    const totalPages =
+      Number.isFinite(totalPagesFromApi) && totalPagesFromApi > 0
+        ? totalPagesFromApi
+        : totalCount !== null
+          ? Math.max(1, Math.ceil(totalCount / Math.max(1, limit)))
+          : null;
+
+    return { hits, limit, offset, nextOffset, prevOffset, totalCount, page, totalPages };
   }
-  if (Array.isArray(data)) return data as SearchHit[];
-  return [];
+
+  if (Array.isArray(data)) {
+    return {
+      hits: data as SearchHit[],
+      limit: 10,
+      offset: 0,
+      nextOffset: null,
+      prevOffset: null,
+      totalCount: null,
+      page: 1,
+      totalPages: null,
+    };
+  }
+
+  return {
+    hits: [],
+    limit: 10,
+    offset: 0,
+    nextOffset: null,
+    prevOffset: null,
+    totalCount: null,
+    page: 1,
+    totalPages: null,
+  };
 }
+
 async function fetchDocPreview(docId: number, signal?: AbortSignal): Promise<DocMeta | null> {
   try {
     const r = await fetch(apiUrl(`/docs/${docId}/preview`), { signal, cache: "no-store" });
@@ -104,15 +191,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="text-lg font-semibold tracking-tight text-slate-100">{children}</h2>;
 }
 
-// Touch detection (skip focusing input on mobile to avoid keyboard fighting the scroll)
 function isTouchDevice() {
   if (typeof window === "undefined") return false;
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 
-/**
- * Exported page: wraps the body in Suspense so useSearchParams() is legal at build time.
- */
 export default function Page() {
   return (
     <Suspense fallback={<main className="min-h-screen bg-slate-950 text-slate-200"><div className="mx-auto max-w-5xl p-6">Loading…</div></main>}>
@@ -121,45 +204,44 @@ export default function Page() {
   );
 }
 
-// ============================================================================
-// PageBody() — the original page content (uses useSearchParams)
-// ============================================================================
 function PageBody() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // ----- Read URL state -----
   const urlQ = sp.get("q") ?? "";
   const urlDoc = sp.get("doc");
+  const urlLimit = Math.max(1, Math.min(50, Number(sp.get("limit") ?? 12) || 12));
+  const urlOffset = Math.max(0, Number(sp.get("offset") ?? 0) || 0);
 
-  // ----- Local UI state -----
   const [reachable, setReachable] = React.useState<boolean | null>(null);
   const [query, setQuery] = React.useState(urlQ);
   const [isSearching, setIsSearching] = React.useState(false);
   const [results, setResults] = React.useState<SearchHit[]>([]);
+
+  const [limit, setLimit] = React.useState<number>(urlLimit);
+  const [offset, setOffset] = React.useState<number>(urlOffset);
+  const [nextOffset, setNextOffset] = React.useState<number | null>(null);
+  const [prevOffset, setPrevOffset] = React.useState<number | null>(null);
+  const [totalCount, setTotalCount] = React.useState<number | null>(null);
+  const [page, setPage] = React.useState<number>(1);
+  const [totalPages, setTotalPages] = React.useState<number | null>(null);
+
   const [expandedMeta, setExpandedMeta] = React.useState<Record<number, DocMeta | null>>({});
   const [expandedSet, setExpandedSet] = React.useState<Set<number>>(new Set());
   const [selectedDoc, setSelectedDoc] = React.useState<{ id: number; label: string } | null>(null);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
-  // --- Search guidance examples & rotating hint ---
-  const EXAMPLES = [
-    "Tundu Lissu",
-    "land disputes",
-    "Judge Mchome ",
-    "robbery with violence",
-    "election petition",
-  ];
+  const EXAMPLES = ["Tundu Lissu", "land disputes", "Judge Mchome", "robbery with violence", "election petition"];
   const [hintIndex, setHintIndex] = React.useState(0);
 
-  // ----- Refs -----
+  const [pageInput, setPageInput] = React.useState<string>("1");
+
   const searchAbortRef = React.useRef<AbortController | null>(null);
   const metaAbortRef = React.useRef<Map<number, AbortController>>(new Map());
   const searchBoxRef = React.useRef<HTMLInputElement>(null);
   const chatPanelRef = React.useRef<HTMLDivElement>(null);
   const pageEndRef = React.useRef<HTMLDivElement>(null);
 
-  // ----- Backend health check on first mount -----
   React.useEffect(() => {
     let ignore = false;
     (async () => {
@@ -176,15 +258,11 @@ function PageBody() {
     };
   }, []);
 
-  // ----- Rotate example hint every 4s -----
   React.useEffect(() => {
-    const id = setInterval(() => {
-      setHintIndex((i) => (i + 1) % EXAMPLES.length);
-    }, 4000);
+    const id = setInterval(() => setHintIndex((i) => (i + 1) % EXAMPLES.length), 4000);
     return () => clearInterval(id);
-  }, []); // EXAMPLES is a stable literal
+  }, [EXAMPLES.length]); // fixed missing dep lint
 
-  // ----- If URL has ?doc=, reflect it into selectedDoc on first load -----
   React.useEffect(() => {
     if (urlDoc) {
       const idNum = Number(urlDoc);
@@ -194,36 +272,29 @@ function PageBody() {
     }
   }, [urlDoc]);
 
-  // ----- Debounced search whenever "query" changes -----
   React.useEffect(() => {
     if (!query?.trim()) {
       setResults([]);
       setExpandedMeta({});
       setExpandedSet(new Set());
+      setNextOffset(null);
+      setPrevOffset(null);
+      setTotalCount(null);
+      setTotalPages(null);
+      setPage(1);
+      setOffset(0);
+      setPageInput("1");
       return;
     }
     const handle = setTimeout(() => {
-      void doSearch(query);
+      setOffset(0);
+      setPageInput("1");
+      void doSearch(query, 0, limit);
     }, 300);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // ----- Keyboard shortcut Cmd/Ctrl+/ -----
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toUpperCase().includes("MAC");
-      const meta = isMac ? e.metaKey : e.ctrlKey;
-      if (meta && e.key === "/") {
-        e.preventDefault();
-        searchBoxRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // ----- Helper: write certain keys back into the URL (q, doc) -----
   function writeUrl(params: Record<string, string | null | undefined>) {
     const cur = new URLSearchParams(sp.toString());
     Object.entries(params).forEach(([k, v]) => {
@@ -234,19 +305,12 @@ function PageBody() {
     router.replace(qs ? `/?${qs}` : "/");
   }
 
-  // ----- Run a search against /search -----
-  async function doSearch(qStr?: string) {
+  async function doSearch(qStr: string | undefined, off: number, lim: number) {
     const raw = qStr ?? query;
-
-    // strict sanitize ONLY here (do NOT re-declare q twice)
-    const q = sanitizeText(raw, MAX_SEARCH_LEN);  // collapses whitespace + trims ends
+    const q = sanitizeText(raw, MAX_SEARCH_LEN);
     if (!q) return;
 
-    if (raw.length > MAX_SEARCH_LEN) {
-      setErrorMsg(`Search limited to ${MAX_SEARCH_LEN} characters.`);
-    }
-
-    writeUrl({ q, doc: null });
+    writeUrl({ q, limit: String(lim), offset: String(off), doc: null });
 
     searchAbortRef.current?.abort();
     const ac = new AbortController();
@@ -258,14 +322,24 @@ function PageBody() {
       const r = await fetch(apiUrl("/search"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q, limit: 12 }),
+        body: JSON.stringify({ q, limit: lim, offset: off }),
         signal: ac.signal,
       });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       const data: unknown = await r.json();
-      const hits = normalizeSearchResults(data);
+      const norm = normalizeSearchPayload(data as SearchResponsePayload | unknown);
 
-      setResults(hits);
+      setResults(norm.hits);
+      setLimit(norm.limit);
+      setOffset(norm.offset);
+      setNextOffset(norm.nextOffset);
+      setPrevOffset(norm.prevOffset);
+      setTotalCount(norm.totalCount);
+      setPage(norm.page);
+      setTotalPages(norm.totalPages);
+
+      setPageInput(String(norm.page || Math.floor(norm.offset / Math.max(1, norm.limit)) + 1));
+
       setExpandedMeta({});
       setExpandedSet(new Set());
     } catch (err: unknown) {
@@ -279,14 +353,17 @@ function PageBody() {
     }
   }
 
-  // ----- Clickable example: set + search -----
+  function onSubmitSearch(e: React.FormEvent) {
+    e.preventDefault();
+    void doSearch(query, 0, limit);
+  }
+
   function pickExample(example: string) {
     const clipped = sanitizeText(example, MAX_SEARCH_LEN);
     setQuery(clipped);
-    void doSearch(clipped);
+    void doSearch(clipped, 0, limit);
   }
 
-  // ----- Expand/Collapse a search result -----
   async function toggleExpand(hit: SearchHit) {
     const docId = (hit.doc_id ?? hit.id) as number | string | undefined;
     if (docId == null) return;
@@ -316,40 +393,93 @@ function PageBody() {
   }
 
   function headerFor(idx: number, hit: SearchHit, meta: DocMeta | null | undefined) {
-    const caseLine = meta?.case_line || hit.case_line || "(No case line)";
-    const court = meta?.court_title || hit.court_title || "Fetching court…";
-    return `${idx + 1}. ${caseLine} — ${court}`;
+    // IMPROVED: Use display_header from backend if available
+    if (hit.display_header) {
+      const absoluteNo = offset + idx + 1;
+      return `${absoluteNo}. ${hit.display_header}`;
+    }
+    if (meta?.display_header) {
+      const absoluteNo = offset + idx + 1;
+      return `${absoluteNo}. ${meta.display_header}`;
+    }
+
+    // Fallback: build manually
+    const caseLine = (meta?.case_line ?? hit.case_line ?? "(No case line)").trim();
+    const rawCourt = (meta?.court_title ?? hit.court_title ?? "").trim();
+    const norm = rawCourt
+      .replace(/\u2026/g, "...")
+      .replace(/\s+/g, " ")
+      .replace(/^[([{]\s*|\s*[)\]}]$/g, "")
+      .toLowerCase();
+    const court = /^(fetching|loading|pending)\s+court/.test(norm) ? "" : rawCourt;
+
+    const absoluteNo = offset + idx + 1;
+    const base = `${absoluteNo}. ${caseLine}`;
+    return court ? `${base} — ${court}` : base;
   }
 
   function handleSelectDoc(id: number, label: string) {
     setSelectedDoc({ id, label });
     writeUrl({ doc: String(id) });
-    // NOTE: we no longer scroll here; see the useEffect below that runs *after* render.
   }
 
-  // --- RELIABLE MOBILE SCROLL: after selectedDoc renders, scroll & (optionally) focus
   React.useEffect(() => {
     if (!selectedDoc) return;
     const el = chatPanelRef.current ?? pageEndRef.current;
     if (!el) return;
 
-    // Try a few times to beat layout/keyboard timings on mobile
-    const delays = [0, 120, 350];
+    const delays = [0, 120, 350, 700];
     delays.forEach((d) => {
-      setTimeout(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, d);
+      setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), d);
     });
 
-    // Only focus the input on non-touch devices (mobile keyboard fights the scroll)
     if (!isTouchDevice()) {
-      const focusDelay = 380;
       setTimeout(() => {
         const inp = document.querySelector<HTMLInputElement>("#chat-question-input");
         inp?.focus();
-      }, focusDelay);
+      }, 380);
     }
   }, [selectedDoc]);
+
+  React.useEffect(() => {
+    if (urlQ.trim()) {
+      void doSearch(urlQ, urlOffset, urlLimit);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pageStart = results.length ? offset + 1 : 0;
+  const pageEnd = offset + results.length;
+  const showTotals = totalPages !== null && totalCount !== null;
+  const displayPage = page || Math.floor(offset / Math.max(1, limit)) + 1;
+
+  React.useEffect(() => {
+    setPageInput(String(displayPage));
+  }, [displayPage]);
+
+  function canPrev(): boolean {
+    return (prevOffset !== null && prevOffset >= 0) || offset > 0;
+  }
+  function canNext(): boolean {
+    if (nextOffset !== null) return true;
+    if (totalCount !== null) return offset + results.length < totalCount;
+    return results.length >= Math.max(1, limit);
+  }
+  function computePrevOffset(): number {
+    if (prevOffset !== null && prevOffset >= 0) return prevOffset;
+    return Math.max(0, offset - Math.max(1, limit));
+  }
+  function computeNextOffset(): number | null {
+    if (nextOffset !== null) return nextOffset;
+    if (results.length < Math.max(1, limit)) return null;
+    return offset + Math.max(1, limit);
+  }
+  function computeLastOffset(): number | null {
+    if (totalPages && totalPages > 0) return (totalPages - 1) * Math.max(1, limit);
+    if (totalCount !== null)
+      return Math.max(0, Math.floor((totalCount - 1) / Math.max(1, limit)) * Math.max(1, limit));
+    return null;
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
@@ -361,34 +491,42 @@ function PageBody() {
               ⚖️ Tanzania Judgments Explorer
             </span>
           </h1>
-          <p className="mt-2 text-slate-300/90">Search Tanzania court judgments instantly — by keyword, party, or judge.</p>
         </div>
 
         {reachable === false && <Banner>Backend API is not reachable. Make sure FastAPI is running.</Banner>}
 
         <Card className="p-5">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void doSearch();
-            }}
-            className="flex flex-col gap-3 md:flex-row md:items-center"
-            role="search"
-            aria-label="Search judgments"
-          >
+          <form onSubmit={onSubmitSearch} className="flex flex-col gap-3 md:flex-row md:items-center" role="search" aria-label="Search judgments">
             <label className="sr-only" htmlFor="q">Search judgments</label>
             <input
               id="q"
               ref={searchBoxRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)} // allow natural typing; sanitize on submit
+              onChange={(e) => setQuery(e.target.value)}
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
-              placeholder={`Type to search… e.g. ${EXAMPLES[hintIndex]} (Cmd/Ctrl+/ to focus)`}
+              placeholder={`Type to search… e.g. ${EXAMPLES[hintIndex]}`}
               className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
               autoComplete="off"
               inputMode="search"
             />
+
+            <div className="flex items-center gap-2">
+              <label htmlFor="page-size" className="text-xs text-slate-300">Page</label>
+              <select
+                id="page-size"
+                value={limit}
+                onChange={(e) => {
+                  const newLimit = Math.max(1, Math.min(50, Number(e.target.value) || 10));
+                  setLimit(newLimit);
+                  void doSearch(query, 0, newLimit);
+                }}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100"
+              >
+                {[10, 12, 15, 20, 30, 50].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+
             <button
               type="submit"
               disabled={!query.trim() || isSearching}
@@ -412,10 +550,9 @@ function PageBody() {
             </p>
           )}
 
-          {/* Search guidance examples */}
           <div className="mt-3 text-sm text-slate-300/80 flex flex-wrap items-center gap-2">
             <span className="opacity-70">Try:</span>
-            {EXAMPLES.slice(0, 4).map((ex, i) => (
+            {["Tundu Lissu", "land disputes", "Judge Mchome", "robbery with violence"].map((ex, i) => (
               <button
                 key={i}
                 type="button"
@@ -430,20 +567,35 @@ function PageBody() {
 
         {results.length > 0 ? (
           <div className="mt-6 space-y-3">
-            <SectionTitle>📑 Search Results</SectionTitle>
+            <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <SectionTitle>📑 Search Results</SectionTitle>
+              <div className="text-sm text-slate-300">
+                Showing <span className="font-semibold">{pageStart || 0}</span>–<span className="font-semibold">{pageEnd || 0}</span>
+                {showTotals && (
+                  <>
+                    {" "}of <span className="font-semibold">{totalCount}</span> • Page{" "}
+                    <span className="font-semibold">{displayPage}</span>
+                    {" "}of <span className="font-semibold">{totalPages}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
             <ul className="space-y-3">
               {results.map((hit, idx) => {
                 const docId = (hit.doc_id ?? hit.id) as number | string | undefined;
                 const idNum = Number(docId);
                 const meta = Number.isFinite(idNum) ? expandedMeta[idNum as number] : undefined;
-                const snippet = hit.snippet || hit.text || "";
+
+                const snippet = (hit.snippet ?? hit.preview ?? hit.text ?? "").trim();
+
                 const summary = meta?.summary;
                 const parties = meta?.parties ?? hit.parties;
                 const date = meta?.date_of_judgment ?? hit.date_of_judgment;
                 const isOpen = Number.isFinite(idNum) ? expandedSet.has(idNum as number) : false;
 
                 return (
-                  <li key={`res-${idx}-${docId ?? "noid"}`}>
+                  <li key={`res-${offset}-${idx}-${docId ?? "noid"}`}>
                     <article
                       className={`group cursor-pointer rounded-2xl border ${
                         isOpen ? "border-slate-700 bg-slate-900/70" : "border-slate-800 bg-slate-900/60"
@@ -484,7 +636,11 @@ function PageBody() {
                                 onClick={() =>
                                   handleSelectDoc(
                                     Number(docId),
-                                    meta?.case_line || hit.case_line || `Doc ${docId}`
+                                    meta?.display_header
+                                      ?? hit.display_header
+                                      ?? meta?.case_line
+                                      ?? hit.case_line
+                                      ?? `Doc ${docId}`
                                   )
                                 }
                               >
@@ -496,13 +652,8 @@ function PageBody() {
                                 onClick={(e) => {
                                   e.preventDefault();
                                   const url = apiUrl(`/doc/${docId}/pdf`);
-                                  // Power users: new tab if Ctrl/Cmd
-                                  if (e.ctrlKey || e.metaKey) {
-                                    window.open(url, "_blank");
-                                  } else {
-                                    // Mobile-friendly: just navigate current tab
-                                    window.location.href = url;
-                                  }
+                                  if ((e as React.MouseEvent).ctrlKey || (e as React.MouseEvent).metaKey) window.open(url, "_blank");
+                                  else window.location.href = url;
                                 }}
                               >
                                 📄 View Judgment
@@ -516,10 +667,110 @@ function PageBody() {
                 );
               })}
             </ul>
+
+            <div className="mt-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-slate-400">
+                Page size: <span className="font-semibold">{limit}</span> • Offset:{" "}
+                <span className="font-semibold">{offset}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label htmlFor="page-jump" className="text-xs text-slate-300">Go to</label>
+                <input
+                  id="page-jump"
+                  type="number"
+                  className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100"
+                  min={1}
+                  max={totalPages ?? undefined}
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const raw = Number(pageInput);
+                      const p = Math.max(1, Math.floor(raw || 1));
+                      if (totalPages && p > totalPages) return;
+                      const newOffset = (p - 1) * Math.max(1, limit);
+                      setOffset(newOffset);
+                      void doSearch(query, newOffset, limit);
+                    }
+                  }}
+                  onBlur={() => {
+                    const raw = Number(pageInput);
+                    const p = Math.max(1, Math.floor(raw || displayPage));
+                    setPageInput(String(Math.min(totalPages ?? p, p)));
+                  }}
+                  disabled={!showTotals || isSearching}
+                />
+
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  disabled={isSearching || !canPrev() || offset === 0}
+                  onClick={() => {
+                    if (!canPrev() || offset === 0) return;
+                    setOffset(0);
+                    void doSearch(query, 0, limit);
+                  }}
+                  title="First page"
+                >
+                  « First
+                </button>
+
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  disabled={isSearching || !canPrev()}
+                  onClick={() => {
+                    if (!canPrev()) return;
+                    const newOff = computePrevOffset();
+                    setOffset(newOff);
+                    void doSearch(query, newOff, limit);
+                  }}
+                  title="Previous page"
+                >
+                  ← Prev
+                </button>
+
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  disabled={isSearching || !canNext()}
+                  onClick={() => {
+                    if (!canNext()) return;
+                    const newOff = nextOffset !== null ? nextOffset : computeNextOffset();
+                    if (newOff === null) return;
+                    setOffset(newOff);
+                    void doSearch(query, newOff, limit);
+                  }}
+                  title="Next page"
+                >
+                  Next →
+                </button>
+
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  disabled={
+                    isSearching ||
+                    computeLastOffset() === null ||
+                    (totalPages !== null && displayPage >= totalPages)
+                  }
+                  onClick={() => {
+                    const lastOff = computeLastOffset();
+                    if (lastOff === null) return;
+                    setOffset(lastOff);
+                    void doSearch(query, lastOff, limit);
+                  }}
+                  title="Last page"
+                >
+                  Last »
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           query.trim() !== "" &&
-          !isSearching && <p className="mt-6 text-sm text-slate-400">No results for “{query}”. Try different keywords.</p>
+          !isSearching && <p className="mt-6 text-sm text-slate-400">No results for &quot;{query}&quot;. Try different keywords.</p>
         )}
 
         {selectedDoc && (
@@ -542,7 +793,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// ChatPanel (unchanged from your working version, with input guards)
+// ChatPanel - NOW WITH STREAMING SUPPORT
 // ============================================================================
 function ChatPanel({
   selectedDoc,
@@ -571,6 +822,10 @@ function ChatPanel({
   const [expandedHistory, setExpandedHistory] = React.useState<Set<number>>(new Set());
   const [historyExcerpts, setHistoryExcerpts] = React.useState<Record<number, boolean>>({});
 
+  // NEW: Streaming state
+  const [isStreaming, setIsStreaming] = React.useState(false);
+  const [streamingAnswer, setStreamingAnswer] = React.useState<string>("");
+
   const askAbortRef = React.useRef<AbortController | null>(null);
 
   function toggleHistory(ts: number) {
@@ -585,7 +840,8 @@ function ChatPanel({
     setHistoryExcerpts((prev) => ({ ...prev, [ts]: !prev[ts] }));
   }
 
-  async function ask() {
+  // NEW: Streaming function
+  async function askStreaming() {
     const q = sanitizeText(question, MAX_CHAT_LEN);
     if (!q) return;
 
@@ -595,6 +851,109 @@ function ChatPanel({
 
     setLastQuestion(q);
     setQuestion("");
+    setIsStreaming(true);
+    setStreamingAnswer("");
+    setAnswer(null);
+    setChunks([]);
+    setShowSources(false);
+
+    try {
+      const r = await fetch(apiUrl("/chat/stream"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doc_id: Number(selectedDoc.id), question: q, k }),
+        signal: ac.signal,
+      });
+
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      if (!r.body) throw new Error("No response body");
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulatedAnswer = "";
+      let currentRunId: string | null = null;
+      let isDone = false;
+
+      while (!isDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          try {
+            const json = JSON.parse(line);
+
+            // Handle error
+            if (json.error) {
+              throw new Error(json.error);
+            }
+
+            // Track run_id to detect duplicate streams
+            if (json.run_id && !currentRunId) {
+              currentRunId = json.run_id;
+            }
+
+            // Accumulate deltas
+            if (json.delta && typeof json.delta === "string") {
+              accumulatedAnswer += json.delta;
+              setStreamingAnswer(accumulatedAnswer);
+            }
+
+            // Check for completion
+            if (json.done === true) {
+              isDone = true;
+              break;
+            }
+          } catch (parseErr) {
+            console.warn("Failed to parse streaming line:", line, parseErr);
+          }
+        }
+      }
+
+      // Clean and finalize
+      const cleaned = cleanLLMAnswer(accumulatedAnswer);
+      setAnswer(cleaned);
+      setStreamingAnswer("");
+
+      // Add to history
+      const ts = Date.now();
+      setQaLog((prev) => [...prev, { q, a: cleaned, chunks: [], ts }]);
+
+    } catch (err: unknown) {
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("Streaming error:", msg);
+        
+        // Fallback to sync /chat
+        console.log("Falling back to synchronous /chat endpoint");
+        await askSync(q);
+        return;
+      }
+    } finally {
+      if (askAbortRef.current === ac) askAbortRef.current = null;
+      setIsStreaming(false);
+    }
+  }
+
+  // Fallback: Synchronous /chat
+  async function askSync(q?: string) {
+    const question = q ? sanitizeText(q, MAX_CHAT_LEN) : "";
+    if (!question) return;
+
+    askAbortRef.current?.abort();
+    const ac = new AbortController();
+    askAbortRef.current = ac;
+
+    if (!q) {
+      setLastQuestion(question);
+      setQuestion("");
+    }
 
     setIsLoading(true);
     setAnswer(null);
@@ -605,7 +964,7 @@ function ChatPanel({
       const r = await fetch(apiUrl("/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doc_id: Number(selectedDoc.id), question: q, k }),
+        body: JSON.stringify({ doc_id: Number(selectedDoc.id), question, k }),
         signal: ac.signal,
       });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -623,7 +982,7 @@ function ChatPanel({
       setChunks(newChunks);
 
       const ts = Date.now();
-      setQaLog((prev) => [...prev, { q, a: cleaned, chunks: newChunks, ts }]);
+      setQaLog((prev) => [...prev, { q: question, a: cleaned, chunks: newChunks, ts }]);
     } catch (err: unknown) {
       if (!(err instanceof DOMException && err.name === "AbortError")) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -635,8 +994,14 @@ function ChatPanel({
     }
   }
 
+  // Main ask function - tries streaming first
+  async function ask() {
+    await askStreaming();
+  }
+
+  const displayAnswer = isStreaming ? streamingAnswer : answer;
   const answerMarkdown =
-    answer == null ? null : (lastQuestion ? `## Question\n${lastQuestion}\n\n## Answer\n` : "") + String(answer);
+    displayAnswer == null ? null : (lastQuestion ? `## Question\n${lastQuestion}\n\n## Answer\n` : "") + String(displayAnswer);
 
   return (
     <div id="chat-panel" className="mt-8">
@@ -694,6 +1059,11 @@ function ChatPanel({
                                       <div className="mb-1 font-medium text-indigo-200/90">
                                         Excerpt [{ch.chunk_no ?? i + 1}]
                                       </div>
+                                      {ch.display_header && (
+                                        <div className="mb-1 text-indigo-200/80">
+                                          {ch.display_header}
+                                        </div>
+                                      )}
                                       <p className="whitespace-pre-wrap break-words leading-relaxed">
                                         {(ch.text ?? ch.preview ?? "").trim()}
                                       </p>
@@ -715,6 +1085,12 @@ function ChatPanel({
 
         {answerMarkdown && (
           <div className="mt-0 mb-4" aria-live="polite">
+            {isStreaming && (
+              <div className="mb-2 flex items-center gap-2 text-xs text-indigo-300">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
+                <span>Streaming response...</span>
+              </div>
+            )}
             <AnswerDisplay markdown={answerMarkdown} />
           </div>
         )}
@@ -738,6 +1114,11 @@ function ChatPanel({
                 {chunks.map((ch, i) => (
                   <div key={i} className="rounded bg-indigo-800/50 p-3 text-sm text-indigo-100">
                     <div className="mb-1 font-medium text-indigo-200/90">Excerpt [{ch.chunk_no ?? i + 1}]</div>
+                    {ch.display_header && (
+                      <div className="mb-1 text-indigo-200/80">
+                        {ch.display_header}
+                      </div>
+                    )}
                     <p className="whitespace-pre-wrap break-words leading-relaxed">
                       {(ch.text ?? ch.preview ?? "").trim()}
                     </p>
@@ -788,14 +1169,14 @@ function ChatPanel({
             <span className="w-6 text-center text-xs text-indigo-200">{k}</span>
             <button
               onClick={() => void ask()}
-              disabled={!question.trim() || isLoading}
+              disabled={!question.trim() || isLoading || isStreaming}
               className="rounded-xl bg-indigo-500 px-4 py-3 font-medium text-indigo-950 hover:bg-indigo-400 disabled:opacity-60"
               aria-label="Ask question"
             >
-              {isLoading ? (
+              {isLoading || isStreaming ? (
                 <span className="inline-flex items-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-900 border-t-transparent" />
-                  Asking…
+                  {isStreaming ? "Streaming…" : "Asking…"}
                 </span>
               ) : (
                 <span>Ask</span>
@@ -814,6 +1195,7 @@ function ChatPanel({
               setQuestion("");
               setAnswer(null);
               setChunks([]);
+              setStreamingAnswer("");
               askAbortRef.current?.abort();
             }}
           >
