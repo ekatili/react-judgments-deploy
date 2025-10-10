@@ -6,47 +6,12 @@
  * - Handles run_id/seq/delta/done/error format
  * - Falls back to sync /chat if streaming fails
  * - Uses display_header from backend when available
- * - Added language detection for English/Swahili UI
  */
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
-
-// ---- Language Detection & Translation ----
-function detectLanguage(text: string): 'en' | 'sw' {
-  const swahiliWords = ['nini', 'kesi', 'lini', 'nani', 'wapi', 'kwa', 'vipi', 'hii', 'hiyo', 'ipi', 'gani', 'swali', 'jibu'];
-  const lowerText = text.toLowerCase();
-  const swahiliCount = swahiliWords.filter(word => lowerText.includes(word)).length;
-  return swahiliCount >= 2 ? 'sw' : 'en';
-}
-
-const translations = {
-  en: {
-    question: "Question",
-    answer: "Answer",
-    ask: "Ask",
-    clearSelection: "Clear selection",
-    reset: "Reset",
-    streaming: "Streaming…",
-    asking: "Asking…",
-  },
-  sw: {
-    question: "Swali",
-    answer: "Jibu",
-    ask: "Uliza",
-    clearSelection: "Futa uchaguzi",
-    reset: "Anzisha upya",
-    streaming: "Inapakia…",
-    asking: "Inauliza…",
-  }
-};
-
-function getTranslation(questionText: string) {
-  const lang = detectLanguage(questionText);
-  return translations[lang];
-}
 
 // ---- Input guards ----------------------------------------------
 const MAX_SEARCH_LEN = 160;
@@ -87,7 +52,7 @@ interface SearchHit {
   text?: string;
   parties?: string;
   date_of_judgment?: string;
-  display_header?: string;
+  display_header?: string; // NEW: backend provides this
 }
 interface DocMeta {
   case_line?: string;
@@ -101,7 +66,7 @@ interface ChatChunk {
   text?: string;
   preview?: string;
   chunk_no?: number;
-  display_header?: string;
+  display_header?: string; // optional header per chunk if backend provides
 }
 interface SearchResponsePayload {
   hits?: SearchHit[];
@@ -296,7 +261,7 @@ function PageBody() {
   React.useEffect(() => {
     const id = setInterval(() => setHintIndex((i) => (i + 1) % EXAMPLES.length), 4000);
     return () => clearInterval(id);
-  }, [EXAMPLES.length]);
+  }, [EXAMPLES.length]); // fixed missing dep lint
 
   React.useEffect(() => {
     if (urlDoc) {
@@ -428,6 +393,7 @@ function PageBody() {
   }
 
   function headerFor(idx: number, hit: SearchHit, meta: DocMeta | null | undefined) {
+    // IMPROVED: Use display_header from backend if available
     if (hit.display_header) {
       const absoluteNo = offset + idx + 1;
       return `${absoluteNo}. ${hit.display_header}`;
@@ -437,6 +403,7 @@ function PageBody() {
       return `${absoluteNo}. ${meta.display_header}`;
     }
 
+    // Fallback: build manually
     const caseLine = (meta?.case_line ?? hit.case_line ?? "(No case line)").trim();
     const rawCourt = (meta?.court_title ?? hit.court_title ?? "").trim();
     const norm = rawCourt
@@ -826,7 +793,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// ChatPanel - WITH STREAMING SUPPORT & LANGUAGE DETECTION
+// ChatPanel - NOW WITH STREAMING SUPPORT
 // ============================================================================
 function ChatPanel({
   selectedDoc,
@@ -837,7 +804,7 @@ function ChatPanel({
 }) {
   function cleanLLMAnswer(raw: string): string {
     return String(raw)
-      .replace(/^\s*(?:#{1,6}\s*)?(?:answer|final answer|response|reply|jibu)\s*:?\s*\n+/i, "")
+      .replace(/^\s*(?:#{1,6}\s*)?(?:answer|final answer|response|reply)\s*:?\s*\n+/i, "")
       .trim();
   }
 
@@ -855,13 +822,11 @@ function ChatPanel({
   const [expandedHistory, setExpandedHistory] = React.useState<Set<number>>(new Set());
   const [historyExcerpts, setHistoryExcerpts] = React.useState<Record<number, boolean>>({});
 
+  // NEW: Streaming state
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [streamingAnswer, setStreamingAnswer] = React.useState<string>("");
 
   const askAbortRef = React.useRef<AbortController | null>(null);
-
-  // Detect language from last question
-  const t = getTranslation(lastQuestion || question);
 
   function toggleHistory(ts: number) {
     setExpandedHistory((prev) => {
@@ -875,95 +840,129 @@ function ChatPanel({
     setHistoryExcerpts((prev) => ({ ...prev, [ts]: !prev[ts] }));
   }
 
-  async function askStreaming() {
-    const q = sanitizeText(question, MAX_CHAT_LEN);
-    if (!q) return;
+  // NEW: Streaming function
+// NEW: Streaming function with DEBUG LOGGING
+async function askStreaming() {
+  const q = sanitizeText(question, MAX_CHAT_LEN);
+  if (!q) return;
 
-    askAbortRef.current?.abort();
-    const ac = new AbortController();
-    askAbortRef.current = ac;
+  console.log('[FRONTEND] Starting stream request...');  // ✅ ADD THIS
 
-    setLastQuestion(q);
-    setQuestion("");
-    setIsStreaming(true);
-    setStreamingAnswer("");
-    setAnswer(null);
-    setChunks([]);
-    setShowSources(false);
+  askAbortRef.current?.abort();
+  const ac = new AbortController();
+  askAbortRef.current = ac;
 
-    try {
-      const r = await fetch(apiUrl("/chat/stream"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doc_id: Number(selectedDoc.id), question: q, k }),
-        signal: ac.signal,
-      });
+  setLastQuestion(q);
+  setQuestion("");
+  setIsStreaming(true);
+  setStreamingAnswer("");
+  setAnswer(null);
+  setChunks([]);
+  setShowSources(false);
 
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-      if (!r.body) throw new Error("No response body");
+  try {
+    console.log('[FRONTEND] Calling /chat/stream...');  // ✅ ADD THIS
+    const r = await fetch(apiUrl("/chat/stream"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_id: Number(selectedDoc.id), question: q, k }),
+      signal: ac.signal,
+    });
 
-      const reader = r.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let accumulatedAnswer = "";
-      let currentRunId: string | null = null;
-      let isDone = false;
+    console.log(`[FRONTEND] Response status: ${r.status}`);  // ✅ ADD THIS
 
-      while (!isDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    if (!r.body) throw new Error("No response body");
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let accumulatedAnswer = "";
+    let currentRunId: string | null = null;
+    let isDone = false;
+    let lineCount = 0;  // ✅ ADD THIS
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
+    console.log('[FRONTEND] Starting to read stream...');  // ✅ ADD THIS
 
-          try {
-            const json = JSON.parse(line);
+    while (!isDone) {
+      const { done, value } = await reader.read();
+      if (done) {
+        console.log('[FRONTEND] Stream read complete');  // ✅ ADD THIS
+        break;
+      }
 
-            if (json.error) throw new Error(json.error);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-            if (json.run_id && !currentRunId) {
-              currentRunId = json.run_id;
-            }
+      for (const line of lines) {
+        if (!line.trim()) continue;
 
-            if (json.delta && typeof json.delta === "string") {
-              accumulatedAnswer += json.delta;
-              setStreamingAnswer(accumulatedAnswer);
-            }
+        lineCount++;  // ✅ ADD THIS
+        if (lineCount % 10 === 0) {  // ✅ ADD THIS
+          console.log(`[FRONTEND] Processed ${lineCount} lines`);
+        }
 
-            if (json.done === true) {
-              isDone = true;
-              break;
-            }
-          } catch (parseErr) {
-            console.warn("Failed to parse streaming line:", line, parseErr);
+        try {
+          const json = JSON.parse(line);
+
+          // Handle error
+          if (json.error) {
+            console.error('[FRONTEND] Server error:', json.error);  // ✅ ADD THIS
+            throw new Error(json.error);
           }
+
+          // Track run_id to detect duplicate streams
+          if (json.run_id && !currentRunId) {
+            currentRunId = json.run_id;
+            console.log(`[FRONTEND] Run ID: ${currentRunId}`);  // ✅ ADD THIS
+          }
+
+          // Accumulate deltas
+          if (json.delta && typeof json.delta === "string") {
+            accumulatedAnswer += json.delta;
+            setStreamingAnswer(accumulatedAnswer);
+          }
+
+          // Check for completion
+          if (json.done === true) {
+            console.log('[FRONTEND] Received done signal');  // ✅ ADD THIS
+            isDone = true;
+            break;
+          }
+        } catch (parseErr) {
+          console.warn("Failed to parse streaming line:", line, parseErr);
         }
       }
-
-      const cleaned = cleanLLMAnswer(accumulatedAnswer);
-      setAnswer(cleaned);
-      setStreamingAnswer("");
-
-      const ts = Date.now();
-      setQaLog((prev) => [...prev, { q, a: cleaned, chunks: [], ts }]);
-
-    } catch (err: unknown) {
-      if (!(err instanceof DOMException && err.name === "AbortError")) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error("Streaming error:", msg);
-        await askSync(q);
-        return;
-      }
-    } finally {
-      if (askAbortRef.current === ac) askAbortRef.current = null;
-      setIsStreaming(false);
     }
-  }
 
+    console.log(`[FRONTEND] Final answer length: ${accumulatedAnswer.length}`);  // ✅ ADD THIS
+
+    // Clean and finalize
+    const cleaned = cleanLLMAnswer(accumulatedAnswer);
+    setAnswer(cleaned);
+    setStreamingAnswer("");
+
+    // Add to history
+    const ts = Date.now();
+    setQaLog((prev) => [...prev, { q, a: cleaned, chunks: [], ts }]);
+
+  } catch (err: unknown) {
+    if (!(err instanceof DOMException && err.name === "AbortError")) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Streaming error:", msg);  // This was already there
+      
+      // Fallback to sync /chat
+      console.log("Falling back to synchronous /chat endpoint");
+      await askSync(q);
+      return;
+    }
+  } finally {
+    if (askAbortRef.current === ac) askAbortRef.current = null;
+    setIsStreaming(false);
+  }
+}
+  // Fallback: Synchronous /chat
   async function askSync(q?: string) {
     const question = q ? sanitizeText(q, MAX_CHAT_LEN) : "";
     if (!question) return;
@@ -1016,13 +1015,14 @@ function ChatPanel({
     }
   }
 
+  // Main ask function - tries streaming first
   async function ask() {
     await askStreaming();
   }
 
   const displayAnswer = isStreaming ? streamingAnswer : answer;
   const answerMarkdown =
-    displayAnswer == null ? null : (lastQuestion ? `## ${t.question}\n${lastQuestion}\n\n## ${t.answer}\n` : "") + String(displayAnswer);
+    displayAnswer == null ? null : (lastQuestion ? `## Question\n${lastQuestion}\n\n## Answer\n` : "") + String(displayAnswer);
 
   return (
     <div id="chat-panel" className="mt-8">
@@ -1039,7 +1039,6 @@ function ChatPanel({
                 const isOpen = expandedHistory.has(item.ts);
                 const showHx = !!historyExcerpts[item.ts];
                 const cardId = `qa-${item.ts}`;
-                const itemT = getTranslation(item.q);
                 return (
                   <li key={item.ts}>
                     <article className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${isOpen ? "shadow-lg" : ""}`}>
@@ -1050,10 +1049,10 @@ function ChatPanel({
                         aria-controls={cardId}
                       >
                         <div className="min-w-0">
-                          <div className="font-medium text-indigo-100 truncate">{itemT.question}: {item.q}</div>
+                          <div className="font-medium text-indigo-100 truncate">Q: {item.q}</div>
                           {!isOpen && (
                             <div className="mt-1 text-sm text-indigo-200/90 line-clamp-1">
-                              {itemT.answer}: {item.a}
+                              A: {item.a}
                             </div>
                           )}
                         </div>
@@ -1065,7 +1064,7 @@ function ChatPanel({
                       {isOpen && (
                         <div id={cardId} className="px-3 pb-3">
                           <div className="mt-2">
-                            <AnswerDisplay markdown={`## ${itemT.question}\n${item.q}\n\n## ${itemT.answer}\n${item.a}`} />
+                            <AnswerDisplay markdown={`## Question\n${item.q}\n\n## Answer\n${item.a}`} />
                           </div>
 
                           {Array.isArray(item.chunks) && item.chunks.length > 0 && (
@@ -1112,7 +1111,7 @@ function ChatPanel({
             {isStreaming && (
               <div className="mb-2 flex items-center gap-2 text-xs text-indigo-300">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
-                <span>{t.streaming}</span>
+                <span>Streaming response...</span>
               </div>
             )}
             <AnswerDisplay markdown={answerMarkdown} />
@@ -1154,7 +1153,7 @@ function ChatPanel({
         )}
 
         <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center">
-          <textarea
+          <input
             id="chat-question-input"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
@@ -1167,6 +1166,7 @@ function ChatPanel({
             }
             className="flex-1 h-24 rounded-xl border border-stone-300 bg-stone-50 px-4 py-3 text-stone-900 placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
             autoComplete="off"
+            inputMode="search"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -1199,10 +1199,10 @@ function ChatPanel({
               {isLoading || isStreaming ? (
                 <span className="inline-flex items-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-900 border-t-transparent" />
-                  {isStreaming ? t.streaming : t.asking}
+                  {isStreaming ? "Streaming…" : "Asking…"}
                 </span>
               ) : (
-                <span>{t.ask}</span>
+                <span>Ask</span>
               )}
             </button>
           </div>
@@ -1210,7 +1210,7 @@ function ChatPanel({
 
         <div className="mt-4 flex items-center gap-3">
           <button className="rounded bg-rose-500 px-3 py-2 text-sm text-white hover:bg-rose-400" onClick={onClear}>
-            🔄 {t.clearSelection}
+            🔄 Clear selection
           </button>
           <button
             className="rounded border border-indigo-700 px-3 py-2 text-sm text-indigo-200 hover:bg-indigo-900"
@@ -1222,7 +1222,7 @@ function ChatPanel({
               askAbortRef.current?.abort();
             }}
           >
-            {t.reset}
+            Reset
           </button>
         </div>
       </Card>
