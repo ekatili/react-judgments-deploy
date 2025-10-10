@@ -493,7 +493,7 @@ function PageBody() {
           </h1>
         </div>
 
-        {reachable === false && <Banner>We're having trouble connecting. Please try again in a moment.</Banner>}
+        {reachable === false && <Banner>We are having trouble connecting. Please try again in a moment.</Banner>}
 
         <Card className="p-5">
           <form onSubmit={onSubmitSearch} className="flex flex-col gap-3 md:flex-row md:items-center" role="search" aria-label="Search judgments">
