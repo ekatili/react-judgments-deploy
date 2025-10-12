@@ -6,12 +6,47 @@
  * - Handles run_id/seq/delta/done/error format
  * - Falls back to sync /chat if streaming fails
  * - Uses display_header from backend when available
+ * - Added language detection for English/Swahili UI
  */
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
+
+// ---- Language Detection & Translation ----
+function detectLanguage(text: string): 'en' | 'sw' {
+  const swahiliWords = ['nini', 'kesi', 'lini', 'nani', 'wapi', 'kwa', 'vipi', 'hii', 'hiyo', 'ipi', 'gani', 'swali', 'jibu'];
+  const lowerText = text.toLowerCase();
+  const swahiliCount = swahiliWords.filter(word => lowerText.includes(word)).length;
+  return swahiliCount >= 2 ? 'sw' : 'en';
+}
+
+const translations = {
+  en: {
+    question: "Question",
+    answer: "Answer",
+    ask: "Ask",
+    clearSelection: "Clear selection",
+    reset: "Reset",
+    streaming: "Streaming…",
+    asking: "Asking…",
+  },
+  sw: {
+    question: "Swali",
+    answer: "Jibu",
+    ask: "Uliza",
+    clearSelection: "Futa uchaguzi",
+    reset: "Anzisha upya",
+    streaming: "Inapakia…",
+    asking: "Inauliza…",
+  }
+};
+
+function getTranslation(questionText: string) {
+  const lang = detectLanguage(questionText);
+  return translations[lang];
+}
 
 // ---- Input guards ----------------------------------------------
 const MAX_SEARCH_LEN = 160;
@@ -36,7 +71,7 @@ function limitPasteIntoInput<T extends HTMLInputElement | HTMLTextAreaElement>(
   }
 }
 
-// ===== API base & helper =====
+// ===== API base & helper (lint-safe) =====
 const ABS_API = (process.env.NEXT_PUBLIC_API_URL || "").trim();
 const apiUrl = (path: string) =>
   ABS_API ? `${ABS_API}${path}` : `/api${path.startsWith("/") ? path : `/${path}`}`;
@@ -52,7 +87,7 @@ interface SearchHit {
   text?: string;
   parties?: string;
   date_of_judgment?: string;
-  display_header?: string; // NEW: backend provides this
+  display_header?: string;
 }
 interface DocMeta {
   case_line?: string;
@@ -66,7 +101,7 @@ interface ChatChunk {
   text?: string;
   preview?: string;
   chunk_no?: number;
-  display_header?: string; // optional header per chunk if backend provides
+  display_header?: string;
 }
 interface SearchResponsePayload {
   hits?: SearchHit[];
@@ -261,7 +296,7 @@ function PageBody() {
   React.useEffect(() => {
     const id = setInterval(() => setHintIndex((i) => (i + 1) % EXAMPLES.length), 4000);
     return () => clearInterval(id);
-  }, [EXAMPLES.length]); // fixed missing dep lint
+  }, [EXAMPLES.length]);
 
   React.useEffect(() => {
     if (urlDoc) {
@@ -393,7 +428,6 @@ function PageBody() {
   }
 
   function headerFor(idx: number, hit: SearchHit, meta: DocMeta | null | undefined) {
-    // IMPROVED: Use display_header from backend if available
     if (hit.display_header) {
       const absoluteNo = offset + idx + 1;
       return `${absoluteNo}. ${hit.display_header}`;
@@ -403,7 +437,6 @@ function PageBody() {
       return `${absoluteNo}. ${meta.display_header}`;
     }
 
-    // Fallback: build manually
     const caseLine = (meta?.case_line ?? hit.case_line ?? "(No case line)").trim();
     const rawCourt = (meta?.court_title ?? hit.court_title ?? "").trim();
     const norm = rawCourt
@@ -445,8 +478,7 @@ function PageBody() {
     if (urlQ.trim()) {
       void doSearch(urlQ, urlOffset, urlLimit);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageStart = results.length ? offset + 1 : 0;
   const pageEnd = offset + results.length;
@@ -651,9 +683,16 @@ function PageBody() {
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  const url = apiUrl(`/doc/${docId}/pdf`);
-                                  if ((e as React.MouseEvent).ctrlKey || (e as React.MouseEvent).metaKey) window.open(url, "_blank");
-                                  else window.location.href = url;
+                                  const path = `/doc/${docId}/pdf`;
+                                  const url = ABS_API
+                                    ? `${ABS_API.replace(/\/+$/,"")}${path}`
+                                    : `/api${path}`;
+                                  const mouse = e as React.MouseEvent<HTMLButtonElement>;
+                                  if (mouse.ctrlKey || mouse.metaKey) {
+                                    window.open(url, "_blank");
+                                  } else {
+                                    window.location.href = url;
+                                  }
                                 }}
                               >
                                 📄 View Judgment
@@ -793,7 +832,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// ChatPanel - NOW WITH STREAMING SUPPORT
+// ChatPanel - WITH STREAMING SUPPORT & LANGUAGE DETECTION
 // ============================================================================
 function ChatPanel({
   selectedDoc,
@@ -804,7 +843,7 @@ function ChatPanel({
 }) {
   function cleanLLMAnswer(raw: string): string {
     return String(raw)
-      .replace(/^\s*(?:#{1,6}\s*)?(?:answer|final answer|response|reply)\s*:?\s*\n+/i, "")
+      .replace(/^\s*(?:#{1,6}\s*)?(?:answer|final answer|response|reply|jibu)\s*:?\s*\n+/i, "")
       .trim();
   }
 
@@ -822,11 +861,13 @@ function ChatPanel({
   const [expandedHistory, setExpandedHistory] = React.useState<Set<number>>(new Set());
   const [historyExcerpts, setHistoryExcerpts] = React.useState<Record<number, boolean>>({});
 
-  // NEW: Streaming state
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [streamingAnswer, setStreamingAnswer] = React.useState<string>("");
 
   const askAbortRef = React.useRef<AbortController | null>(null);
+
+  // Detect language from last question
+  const t = getTranslation(lastQuestion || question);
 
   function toggleHistory(ts: number) {
     setExpandedHistory((prev) => {
@@ -840,129 +881,95 @@ function ChatPanel({
     setHistoryExcerpts((prev) => ({ ...prev, [ts]: !prev[ts] }));
   }
 
-  // NEW: Streaming function
-// NEW: Streaming function with DEBUG LOGGING
-async function askStreaming() {
-  const q = sanitizeText(question, MAX_CHAT_LEN);
-  if (!q) return;
+  async function askStreaming() {
+    const q = sanitizeText(question, MAX_CHAT_LEN);
+    if (!q) return;
 
-  console.log('[FRONTEND] Starting stream request...');  // ✅ ADD THIS
+    askAbortRef.current?.abort();
+    const ac = new AbortController();
+    askAbortRef.current = ac;
 
-  askAbortRef.current?.abort();
-  const ac = new AbortController();
-  askAbortRef.current = ac;
-
-  setLastQuestion(q);
-  setQuestion("");
-  setIsStreaming(true);
-  setStreamingAnswer("");
-  setAnswer(null);
-  setChunks([]);
-  setShowSources(false);
-
-  try {
-    console.log('[FRONTEND] Calling /chat/stream...');  // ✅ ADD THIS
-    const r = await fetch(apiUrl("/chat/stream"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ doc_id: Number(selectedDoc.id), question: q, k }),
-      signal: ac.signal,
-    });
-
-    console.log(`[FRONTEND] Response status: ${r.status}`);  // ✅ ADD THIS
-
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    if (!r.body) throw new Error("No response body");
-
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let accumulatedAnswer = "";
-    let currentRunId: string | null = null;
-    let isDone = false;
-    let lineCount = 0;  // ✅ ADD THIS
-
-    console.log('[FRONTEND] Starting to read stream...');  // ✅ ADD THIS
-
-    while (!isDone) {
-      const { done, value } = await reader.read();
-      if (done) {
-        console.log('[FRONTEND] Stream read complete');  // ✅ ADD THIS
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-
-        lineCount++;  // ✅ ADD THIS
-        if (lineCount % 10 === 0) {  // ✅ ADD THIS
-          console.log(`[FRONTEND] Processed ${lineCount} lines`);
-        }
-
-        try {
-          const json = JSON.parse(line);
-
-          // Handle error
-          if (json.error) {
-            console.error('[FRONTEND] Server error:', json.error);  // ✅ ADD THIS
-            throw new Error(json.error);
-          }
-
-          // Track run_id to detect duplicate streams
-          if (json.run_id && !currentRunId) {
-            currentRunId = json.run_id;
-            console.log(`[FRONTEND] Run ID: ${currentRunId}`);  // ✅ ADD THIS
-          }
-
-          // Accumulate deltas
-          if (json.delta && typeof json.delta === "string") {
-            accumulatedAnswer += json.delta;
-            setStreamingAnswer(accumulatedAnswer);
-          }
-
-          // Check for completion
-          if (json.done === true) {
-            console.log('[FRONTEND] Received done signal');  // ✅ ADD THIS
-            isDone = true;
-            break;
-          }
-        } catch (parseErr) {
-          console.warn("Failed to parse streaming line:", line, parseErr);
-        }
-      }
-    }
-
-    console.log(`[FRONTEND] Final answer length: ${accumulatedAnswer.length}`);  // ✅ ADD THIS
-
-    // Clean and finalize
-    const cleaned = cleanLLMAnswer(accumulatedAnswer);
-    setAnswer(cleaned);
+    setLastQuestion(q);
+    setQuestion("");
+    setIsStreaming(true);
     setStreamingAnswer("");
+    setAnswer(null);
+    setChunks([]);
+    setShowSources(false);
 
-    // Add to history
-    const ts = Date.now();
-    setQaLog((prev) => [...prev, { q, a: cleaned, chunks: [], ts }]);
+    try {
+      const r = await fetch(apiUrl("/chat/stream"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doc_id: Number(selectedDoc.id), question: q, k }),
+        signal: ac.signal,
+      });
 
-  } catch (err: unknown) {
-    if (!(err instanceof DOMException && err.name === "AbortError")) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("Streaming error:", msg);  // This was already there
-      
-      // Fallback to sync /chat
-      console.log("Falling back to synchronous /chat endpoint");
-      await askSync(q);
-      return;
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      if (!r.body) throw new Error("No response body");
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulatedAnswer = "";
+      let currentRunId: string | null = null;
+      let isDone = false;
+
+      while (!isDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          try {
+            const json = JSON.parse(line);
+
+            if (json.error) throw new Error(json.error);
+
+            if (json.run_id && !currentRunId) {
+              currentRunId = json.run_id;
+            }
+
+            if (json.delta && typeof json.delta === "string") {
+              accumulatedAnswer += json.delta;
+              setStreamingAnswer(accumulatedAnswer);
+            }
+
+            if (json.done === true) {
+              isDone = true;
+              break;
+            }
+          } catch (parseErr) {
+            console.warn("Failed to parse streaming line:", line, parseErr);
+          }
+        }
+      }
+
+      const cleaned = cleanLLMAnswer(accumulatedAnswer);
+      setAnswer(cleaned);
+      setStreamingAnswer("");
+
+      const ts = Date.now();
+      setQaLog((prev) => [...prev, { q, a: cleaned, chunks: [], ts }]);
+
+    } catch (err: unknown) {
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("Streaming error:", msg);
+        await askSync(q);
+        return;
+      }
+    } finally {
+      if (askAbortRef.current === ac) askAbortRef.current = null;
+      setIsStreaming(false);
     }
-  } finally {
-    if (askAbortRef.current === ac) askAbortRef.current = null;
-    setIsStreaming(false);
   }
-}
-  // Fallback: Synchronous /chat
+
   async function askSync(q?: string) {
     const question = q ? sanitizeText(q, MAX_CHAT_LEN) : "";
     if (!question) return;
@@ -1015,14 +1022,13 @@ async function askStreaming() {
     }
   }
 
-  // Main ask function - tries streaming first
   async function ask() {
     await askStreaming();
   }
 
   const displayAnswer = isStreaming ? streamingAnswer : answer;
   const answerMarkdown =
-    displayAnswer == null ? null : (lastQuestion ? `## Question\n${lastQuestion}\n\n## Answer\n` : "") + String(displayAnswer);
+    displayAnswer == null ? null : (lastQuestion ? `## ${t.question}\n${lastQuestion}\n\n## ${t.answer}\n` : "") + String(displayAnswer);
 
   return (
     <div id="chat-panel" className="mt-8">
@@ -1039,6 +1045,7 @@ async function askStreaming() {
                 const isOpen = expandedHistory.has(item.ts);
                 const showHx = !!historyExcerpts[item.ts];
                 const cardId = `qa-${item.ts}`;
+                const itemT = getTranslation(item.q);
                 return (
                   <li key={item.ts}>
                     <article className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${isOpen ? "shadow-lg" : ""}`}>
@@ -1049,10 +1056,10 @@ async function askStreaming() {
                         aria-controls={cardId}
                       >
                         <div className="min-w-0">
-                          <div className="font-medium text-indigo-100 truncate">Q: {item.q}</div>
+                          <div className="font-medium text-indigo-100 truncate">{itemT.question}: {item.q}</div>
                           {!isOpen && (
                             <div className="mt-1 text-sm text-indigo-200/90 line-clamp-1">
-                              A: {item.a}
+                              {itemT.answer}: {item.a}
                             </div>
                           )}
                         </div>
@@ -1064,7 +1071,7 @@ async function askStreaming() {
                       {isOpen && (
                         <div id={cardId} className="px-3 pb-3">
                           <div className="mt-2">
-                            <AnswerDisplay markdown={`## Question\n${item.q}\n\n## Answer\n${item.a}`} />
+                            <AnswerDisplay markdown={`## ${itemT.question}\n${item.q}\n\n## ${itemT.answer}\n${item.a}`} />
                           </div>
 
                           {Array.isArray(item.chunks) && item.chunks.length > 0 && (
@@ -1111,7 +1118,7 @@ async function askStreaming() {
             {isStreaming && (
               <div className="mb-2 flex items-center gap-2 text-xs text-indigo-300">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
-                <span>Streaming response...</span>
+                <span>{t.streaming}</span>
               </div>
             )}
             <AnswerDisplay markdown={answerMarkdown} />
@@ -1153,7 +1160,7 @@ async function askStreaming() {
         )}
 
         <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center">
-          <input
+          <textarea
             id="chat-question-input"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
@@ -1166,7 +1173,6 @@ async function askStreaming() {
             }
             className="flex-1 h-24 rounded-xl border border-stone-300 bg-stone-50 px-4 py-3 text-stone-900 placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
             autoComplete="off"
-            inputMode="search"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -1199,10 +1205,10 @@ async function askStreaming() {
               {isLoading || isStreaming ? (
                 <span className="inline-flex items-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-900 border-t-transparent" />
-                  {isStreaming ? "Streaming…" : "Asking…"}
+                  {isStreaming ? t.streaming : t.asking}
                 </span>
               ) : (
-                <span>Ask</span>
+                <span>{t.ask}</span>
               )}
             </button>
           </div>
@@ -1210,7 +1216,7 @@ async function askStreaming() {
 
         <div className="mt-4 flex items-center gap-3">
           <button className="rounded bg-rose-500 px-3 py-2 text-sm text-white hover:bg-rose-400" onClick={onClear}>
-            🔄 Clear selection
+            🔄 {t.clearSelection}
           </button>
           <button
             className="rounded border border-indigo-700 px-3 py-2 text-sm text-indigo-200 hover:bg-indigo-900"
@@ -1222,7 +1228,7 @@ async function askStreaming() {
               askAbortRef.current?.abort();
             }}
           >
-            Reset
+            {t.reset}
           </button>
         </div>
       </Card>
