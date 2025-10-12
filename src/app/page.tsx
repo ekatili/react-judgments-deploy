@@ -72,10 +72,22 @@ function limitPasteIntoInput<T extends HTMLInputElement | HTMLTextAreaElement>(
 }
 
 // ===== API base & helper =====
-const ABS_API =
+// before:
+// const ABS_API = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+
+let ABS_API =
   (process.env.NEXT_PUBLIC_API_URL ||
    process.env.NEXT_PUBLIC_BACKEND_URL ||
    "").trim();
+
+if (!ABS_API && typeof window !== "undefined") {
+  // one-time warning in the browser so we know we’re using the proxy
+  (window as any).__ABS_API_WARNED__ ||
+    (console.warn(
+      "[frontend] NEXT_PUBLIC_API_URL / NEXT_PUBLIC_BACKEND_URL is empty — falling back to /api proxy"
+    ),
+    ((window as any).__ABS_API_WARNED__ = true));
+}
 
 const apiUrl = (path: string) =>
   ABS_API ? `${ABS_API}${path}` : `/api${path.startsWith("/") ? path : `/${path}`}`;
