@@ -71,26 +71,36 @@ function limitPasteIntoInput<T extends HTMLInputElement | HTMLTextAreaElement>(
   }
 }
 
-// ===== API base & helper =====
-// before:
-// const ABS_API = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+// ===== API base & helper (lint-safe) =====
 
-let ABS_API =
-  (process.env.NEXT_PUBLIC_API_URL ||
-   process.env.NEXT_PUBLIC_BACKEND_URL ||
-   "").trim();
-
-if (!ABS_API && typeof window !== "undefined") {
-  // one-time warning in the browser so we know we’re using the proxy
-  (window as any).__ABS_API_WARNED__ ||
-    (console.warn(
-      "[frontend] NEXT_PUBLIC_API_URL / NEXT_PUBLIC_BACKEND_URL is empty — falling back to /api proxy"
-    ),
-    ((window as any).__ABS_API_WARNED__ = true));
+// Let TS know about our one-time warning flag on window
+declare global {
+  interface Window {
+    __ABS_API_WARNED__?: boolean;
+  }
 }
 
-const apiUrl = (path: string) =>
-  ABS_API ? `${ABS_API}${path}` : `/api${path.startsWith("/") ? path : `/${path}`}`;
+const ABS_API: string = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  ""
+).trim();
+
+// If no absolute backend is configured, warn once in the browser.
+// (Dev-only UX; harmless in production too.)
+if (!ABS_API && typeof window !== "undefined") {
+  if (!window.__ABS_API_WARNED__) {
+    console.warn(
+      "[frontend] NEXT_PUBLIC_API_URL / NEXT_PUBLIC_BACKEND_URL is empty — falling back to /api proxy"
+    );
+    window.__ABS_API_WARNED__ = true;
+  }
+}
+
+const apiUrl = (path: string): string => {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return ABS_API ? `${ABS_API}${p}` : `/api${p}`;
+};
 
 // ----- Types -----
 interface SearchHit {
@@ -494,8 +504,7 @@ function PageBody() {
     if (urlQ.trim()) {
       void doSearch(urlQ, urlOffset, urlLimit);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageStart = results.length ? offset + 1 : 0;
   const pageEnd = offset + results.length;
@@ -700,9 +709,16 @@ function PageBody() {
                                 className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  const url = apiUrl(`/doc/${docId}/pdf`);
-                                  if ((e as React.MouseEvent).ctrlKey || (e as React.MouseEvent).metaKey) window.open(url, "_blank");
-                                  else window.location.href = url;
+                                  const path = `/doc/${docId}/pdf`;
+                                  const url = ABS_API
+                                    ? `${ABS_API.replace(/\/+$/,"")}${path}`
+                                    : `/api${path}`;
+                                  const mouse = e as React.MouseEvent<HTMLButtonElement>;
+                                  if (mouse.ctrlKey || mouse.metaKey) {
+                                    window.open(url, "_blank");
+                                  } else {
+                                    window.location.href = url;
+                                  }
                                 }}
                               >
                                 📄 View Judgment
