@@ -7,12 +7,165 @@
  * - Falls back to sync /chat if streaming fails
  * - Uses display_header from backend when available
  * - Added language detection for English/Swahili UI
+ * - Added ChatGPT-style theme switcher (Deep Dark, Light, Dark)
  */
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 const AnswerDisplay = dynamic(() => import("../components/AnswerDisplay"), { ssr: false });
+
+// ============================================================================
+// THEME SYSTEM
+// ============================================================================
+
+type ThemeName = 'deep-dark' | 'chatgpt-light' | 'chatgpt-dark';
+
+interface Theme {
+  name: ThemeName;
+  label: string;
+  classes: {
+    body: string;
+    card: string;
+    cardHover: string;
+    cardExpanded: string;
+    input: string;
+    button: string;
+    buttonHover: string;
+    secondaryButton: string;
+    secondaryButtonHover: string;
+    dangerButton: string;
+    dangerButtonHover: string;
+    text: string;
+    textSecondary: string;
+    textMuted: string;
+    border: string;
+    borderLight: string;
+    chatPanel: string;
+    chatPanelBorder: string;
+    historyCard: string;
+    historyCardBorder: string;
+    excerptBg: string;
+    gradient: string;
+    badge: string;
+    badgeText: string;
+    select: string;
+  };
+}
+
+const themes: Record<ThemeName, Theme> = {
+  'deep-dark': {
+    name: 'deep-dark',
+    label: '🌙 Deep Dark',
+    classes: {
+      body: 'bg-slate-950 text-slate-200',
+      card: 'bg-slate-900/60 border-slate-800/40',
+      cardHover: 'hover:border-slate-600',
+      cardExpanded: 'border-slate-700 bg-slate-900/70',
+      input: 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-400 focus:ring-emerald-400',
+      button: 'bg-emerald-500 text-emerald-950 hover:bg-emerald-400',
+      buttonHover: 'hover:bg-emerald-400',
+      secondaryButton: 'bg-slate-800 text-slate-200 border-slate-700',
+      secondaryButtonHover: 'hover:bg-slate-700',
+      dangerButton: 'bg-rose-500 text-white hover:bg-rose-400',
+      dangerButtonHover: 'hover:bg-rose-400',
+      text: 'text-slate-100',
+      textSecondary: 'text-slate-300',
+      textMuted: 'text-slate-400',
+      border: 'border-slate-800',
+      borderLight: 'border-slate-700',
+      chatPanel: 'bg-indigo-950/70 border-indigo-700',
+      chatPanelBorder: 'border-indigo-700',
+      historyCard: 'bg-indigo-900/40 border-indigo-800/60',
+      historyCardBorder: 'border-indigo-700',
+      excerptBg: 'bg-indigo-800/50 text-indigo-100',
+      gradient: 'from-emerald-300 via-sky-300 to-indigo-300',
+      badge: 'bg-slate-800 border-slate-700',
+      badgeText: 'text-slate-300',
+      select: 'bg-slate-900 border-slate-700 text-slate-100',
+    },
+  },
+  'chatgpt-light': {
+    name: 'chatgpt-light',
+    label: '☀️ Light',
+    classes: {
+      body: 'bg-white text-gray-900',
+      card: 'bg-white border-gray-200',
+      cardHover: 'hover:border-gray-300',
+      cardExpanded: 'border-gray-300 bg-gray-50',
+      input: 'bg-white border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-emerald-500 focus:border-emerald-500',
+      button: 'bg-emerald-600 text-white hover:bg-emerald-700',
+      buttonHover: 'hover:bg-emerald-700',
+      secondaryButton: 'bg-gray-100 text-gray-700 border-gray-300',
+      secondaryButtonHover: 'hover:bg-gray-200',
+      dangerButton: 'bg-rose-600 text-white hover:bg-rose-700',
+      dangerButtonHover: 'hover:bg-rose-700',
+      text: 'text-gray-900',
+      textSecondary: 'text-gray-700',
+      textMuted: 'text-gray-500',
+      border: 'border-gray-200',
+      borderLight: 'border-gray-300',
+      chatPanel: 'bg-gray-50 border-gray-200',
+      chatPanelBorder: 'border-gray-300',
+      historyCard: 'bg-white border-gray-200',
+      historyCardBorder: 'border-gray-300',
+      excerptBg: 'bg-gray-100 text-gray-900',
+      gradient: 'from-emerald-600 via-teal-600 to-cyan-600',
+      badge: 'bg-gray-100 border-gray-300',
+      badgeText: 'text-gray-700',
+      select: 'bg-white border-gray-300 text-gray-900',
+    },
+  },
+  'chatgpt-dark': {
+    name: 'chatgpt-dark',
+    label: '🌑 Dark',
+    classes: {
+      body: 'bg-[#212121] text-gray-100',
+      card: 'bg-[#2f2f2f] border-gray-700',
+      cardHover: 'hover:border-gray-600',
+      cardExpanded: 'border-gray-600 bg-[#353535]',
+      input: 'bg-[#40414f] border-gray-600 text-gray-100 placeholder-gray-400 focus:ring-emerald-500',
+      button: 'bg-emerald-600 text-white hover:bg-emerald-700',
+      buttonHover: 'hover:bg-emerald-700',
+      secondaryButton: 'bg-[#40414f] text-gray-200 border-gray-600',
+      secondaryButtonHover: 'hover:bg-[#4a4b5a]',
+      dangerButton: 'bg-rose-600 text-white hover:bg-rose-700',
+      dangerButtonHover: 'hover:bg-rose-700',
+      text: 'text-gray-100',
+      textSecondary: 'text-gray-300',
+      textMuted: 'text-gray-400',
+      border: 'border-gray-700',
+      borderLight: 'border-gray-600',
+      chatPanel: 'bg-[#343541] border-gray-600',
+      chatPanelBorder: 'border-gray-600',
+      historyCard: 'bg-[#40414f] border-gray-600',
+      historyCardBorder: 'border-gray-600',
+      excerptBg: 'bg-[#444654] text-gray-100',
+      gradient: 'from-emerald-400 via-teal-400 to-cyan-400',
+      badge: 'bg-[#40414f] border-gray-600',
+      badgeText: 'text-gray-300',
+      select: 'bg-[#40414f] border-gray-600 text-gray-100',
+    },
+  },
+};
+
+function useTheme() {
+  const [currentTheme, setCurrentTheme] = React.useState<ThemeName>('deep-dark');
+
+  React.useEffect(() => {
+    const saved = localStorage.getItem('theme') as ThemeName | null;
+    if (saved && themes[saved]) {
+      setCurrentTheme(saved);
+    }
+  }, []);
+
+  const changeTheme = (name: ThemeName) => {
+    setCurrentTheme(name);
+    localStorage.setItem('theme', name);
+  };
+
+  return { theme: themes[currentTheme], currentTheme, changeTheme, allThemes: themes };
+}
 
 // ---- Language Detection & Translation ----
 function detectLanguage(text: string): 'en' | 'sw' {
@@ -208,22 +361,52 @@ async function fetchDocPreview(docId: number, signal?: AbortSignal): Promise<Doc
 }
 
 // ----- Small UI helpers -----
-function Banner({ children }: { children: React.ReactNode }) {
+function Banner({ children, theme }: { children: React.ReactNode; theme: Theme }) {
   return (
-    <div className="rounded-xl border border-amber-300/30 bg-amber-100 text-amber-900 px-4 py-3 text-sm">
+    <div className={`rounded-xl border ${theme.classes.borderLight} bg-amber-100 text-amber-900 px-4 py-3 text-sm`}>
       {children}
     </div>
   );
 }
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+
+function Card({ children, className = "", theme }: { 
+  children: React.ReactNode; 
+  className?: string;
+  theme: Theme;
+}) {
   return (
-    <div className={`rounded-2xl border border-slate-800/40 bg-slate-900/60 shadow-lg backdrop-blur ${className}`}>
+    <div className={`rounded-2xl border ${theme.classes.card} shadow-lg backdrop-blur ${className}`}>
       {children}
     </div>
   );
 }
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-lg font-semibold tracking-tight text-slate-100">{children}</h2>;
+
+function SectionTitle({ children, theme }: { children: React.ReactNode; theme: Theme }) {
+  return <h2 className={`text-lg font-semibold tracking-tight ${theme.classes.text}`}>{children}</h2>;
+}
+
+function ThemeSwitcher({ currentTheme, onChangeTheme, allThemes, theme }: { 
+  currentTheme: ThemeName; 
+  onChangeTheme: (theme: ThemeName) => void;
+  allThemes: Record<ThemeName, Theme>;
+  theme: Theme;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`text-xs ${theme.classes.textMuted}`}>Theme:</span>
+      <select
+        value={currentTheme}
+        onChange={(e) => onChangeTheme(e.target.value as ThemeName)}
+        className={`rounded-lg px-3 py-1.5 text-sm ${theme.classes.select} focus:outline-none focus:ring-2 focus:ring-emerald-500`}
+      >
+        {Object.values(allThemes).map((t) => (
+          <option key={t.name} value={t.name}>
+            {t.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 function isTouchDevice() {
@@ -233,7 +416,11 @@ function isTouchDevice() {
 
 export default function Page() {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-slate-950 text-slate-200"><div className="mx-auto max-w-5xl p-6">Loading…</div></main>}>
+    <Suspense fallback={
+      <main className="min-h-screen bg-slate-950 text-slate-200">
+        <div className="mx-auto max-w-5xl p-6">Loading…</div>
+      </main>
+    }>
       <PageBody />
     </Suspense>
   );
@@ -242,6 +429,7 @@ export default function Page() {
 function PageBody() {
   const router = useRouter();
   const sp = useSearchParams();
+  const { theme, currentTheme, changeTheme, allThemes } = useTheme();
 
   const urlQ = sp.get("q") ?? "";
   const urlDoc = sp.get("doc");
@@ -514,20 +702,30 @@ function PageBody() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]">
+    <main className={`min-h-screen ${theme.classes.body} transition-colors duration-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]`}>
       <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500" />
       <div className="mx-auto max-w-5xl px-4 py-8 md:py-10">
+        {/* Theme Switcher */}
+        <div className="mb-4 flex justify-end">
+          <ThemeSwitcher 
+            currentTheme={currentTheme} 
+            onChangeTheme={changeTheme}
+            allThemes={allThemes}
+            theme={theme}
+          />
+        </div>
+
         <div className="mb-6">
           <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
-            <span className="bg-gradient-to-r from-emerald-300 via-sky-300 to-indigo-300 bg-clip-text text-transparent">
+            <span className={`bg-gradient-to-r ${theme.classes.gradient} bg-clip-text text-transparent`}>
               ⚖️ Tanzania Judgments Explorer
             </span>
           </h1>
         </div>
 
-        {reachable === false && <Banner>We are having trouble connecting. Please try again in a moment.</Banner>}
+        {reachable === false && <Banner theme={theme}>We are having trouble connecting. Please try again in a moment.</Banner>}
 
-        <Card className="p-5">
+        <Card theme={theme} className="p-5">
           <form onSubmit={onSubmitSearch} className="flex flex-col gap-3 md:flex-row md:items-center" role="search" aria-label="Search judgments">
             <label className="sr-only" htmlFor="q">Search judgments</label>
             <input
@@ -538,13 +736,13 @@ function PageBody() {
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
               placeholder={`Search judgments e.g. ${EXAMPLES[hintIndex]}`}
-              className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              className={`flex-1 rounded-xl ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
               autoComplete="off"
               inputMode="search"
             />
 
             <div className="flex items-center gap-2">
-              <label htmlFor="page-size" className="text-xs text-slate-300">Page</label>
+              <label htmlFor="page-size" className={`text-xs ${theme.classes.textSecondary}`}>Page</label>
               <select
                 id="page-size"
                 value={limit}
@@ -553,7 +751,7 @@ function PageBody() {
                   setLimit(newLimit);
                   void doSearch(query, 0, newLimit);
                 }}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100"
+                className={`rounded-lg ${theme.classes.select} px-2 py-2`}
               >
                 {[10, 12, 15, 20, 30, 50].map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
@@ -562,12 +760,12 @@ function PageBody() {
             <button
               type="submit"
               disabled={!query.trim() || isSearching}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 font-medium text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
+              className={`inline-flex items-center justify-center gap-2 rounded-xl ${theme.classes.button} px-4 py-3 font-medium disabled:opacity-60`}
               aria-label="Run search"
             >
               {isSearching ? (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-900 border-t-transparent" />
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                   Searching…
                 </span>
               ) : (
@@ -577,19 +775,19 @@ function PageBody() {
           </form>
 
           {errorMsg && (
-            <p className="mt-3 text-sm text-rose-300" role="status" aria-live="polite">
+            <p className="mt-3 text-sm text-rose-400" role="status" aria-live="polite">
               {errorMsg}
             </p>
           )}
 
-          <div className="mt-3 text-sm text-slate-300/80 flex flex-wrap items-center gap-2">
+          <div className={`mt-3 text-sm ${theme.classes.textMuted} flex flex-wrap items-center gap-2`}>
             <span className="opacity-70">Try:</span>
             {["Tundu Lissu", "Land disputes", "Judge Lubuva", "Robbery with violence"].map((ex, i) => (
               <button
                 key={i}
                 type="button"
                 onClick={() => pickExample(ex)}
-                className="rounded-full bg-slate-800 hover:bg-slate-700 px-3 py-1"
+                className={`rounded-full ${theme.classes.badge} ${theme.classes.secondaryButtonHover} px-3 py-1`}
               >
                 {ex}
               </button>
@@ -600,8 +798,8 @@ function PageBody() {
         {results.length > 0 ? (
           <div className="mt-6 space-y-3">
             <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <SectionTitle>📑 Search Results</SectionTitle>
-              <div className="text-sm text-slate-300">
+              <SectionTitle theme={theme}>📑 Search Results</SectionTitle>
+              <div className={`text-sm ${theme.classes.textSecondary}`}>
                 Showing <span className="font-semibold">{pageStart || 0}</span>–<span className="font-semibold">{pageEnd || 0}</span>
                 {showTotals && (
                   <>
@@ -630,8 +828,10 @@ function PageBody() {
                   <li key={`res-${offset}-${idx}-${docId ?? "noid"}`}>
                     <article
                       className={`group cursor-pointer rounded-2xl border ${
-                        isOpen ? "border-slate-700 bg-slate-900/70" : "border-slate-800 bg-slate-900/60"
-                      } p-4 outline-none transition hover:border-slate-600 focus-visible:ring-2 focus-visible:ring-cyan-400`}
+                        isOpen 
+                          ? theme.classes.cardExpanded
+                          : `${theme.classes.card} ${theme.classes.cardHover}`
+                      } p-4 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400`}
                       role="button"
                       tabIndex={0}
                       aria-expanded={isOpen}
@@ -644,27 +844,27 @@ function PageBody() {
                       }}
                     >
                       <header className="flex items-start justify-between gap-3">
-                        <h3 className="text-base font-medium text-slate-100">{headerFor(idx, hit, meta)}</h3>
-                        <span className="shrink-0 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300">
+                        <h3 className={`text-base font-medium ${theme.classes.text}`}>{headerFor(idx, hit, meta)}</h3>
+                        <span className={`shrink-0 rounded-md border ${theme.classes.borderLight} px-2 py-1 text-xs ${theme.classes.badgeText}`}>
                           {isOpen ? "Hide" : "Expand"}
                         </span>
                       </header>
 
                       {(meta?.parties ?? hit.parties) && (
-                        <p className="mt-1 text-sm text-slate-300">{meta?.parties ?? hit.parties}</p>
+                        <p className={`mt-1 text-sm ${theme.classes.textSecondary}`}>{meta?.parties ?? hit.parties}</p>
                       )}
 
                       {isOpen && (
                         <div className="mt-3 space-y-2">
-                          {parties && <p className="text-sm">Parties: {parties}</p>}
-                          {date && <p className="text-sm">Date: {date}</p>}
-                          {snippet && <p className="text-sm text-slate-300">{snippet}</p>}
-                          {summary && <p className="text-sm text-slate-300">Summary: {summary}</p>}
+                          {parties && <p className={`text-sm ${theme.classes.textSecondary}`}>Parties: {parties}</p>}
+                          {date && <p className={`text-sm ${theme.classes.textSecondary}`}>Date: {date}</p>}
+                          {snippet && <p className={`text-sm ${theme.classes.textSecondary}`}>{snippet}</p>}
+                          {summary && <p className={`text-sm ${theme.classes.textSecondary}`}>Summary: {summary}</p>}
 
                           {docId != null && (
                             <div className="flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
                               <button
-                                className="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-3 py-2 text-sm font-medium text-cyan-950 hover:bg-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-300"
+                                className={`inline-flex items-center justify-center rounded-xl bg-cyan-500 px-3 py-2 text-sm font-medium text-cyan-950 hover:bg-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-300`}
                                 onClick={() =>
                                   handleSelectDoc(
                                     Number(docId),
@@ -680,7 +880,7 @@ function PageBody() {
                               </button>
 
                               <button
-                                className="ml-auto inline-flex items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-300"
+                                className={`ml-auto inline-flex items-center justify-center rounded-xl ${theme.classes.button} px-3 py-2 text-sm font-medium focus-visible:ring-2`}
                                 onClick={(e) => {
                                   e.preventDefault();
                                   const path = `/doc/${docId}/pdf`;
@@ -708,17 +908,17 @@ function PageBody() {
             </ul>
 
             <div className="mt-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-slate-400">
+              <div className={`text-xs ${theme.classes.textMuted}`}>
                 Page size: <span className="font-semibold">{limit}</span> • Offset:{" "}
                 <span className="font-semibold">{offset}</span>
               </div>
 
               <div className="flex items-center gap-2">
-                <label htmlFor="page-jump" className="text-xs text-slate-300">Go to</label>
+                <label htmlFor="page-jump" className={`text-xs ${theme.classes.textSecondary}`}>Go to</label>
                 <input
                   id="page-jump"
                   type="number"
-                  className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100"
+                  className={`w-20 rounded-lg ${theme.classes.input} px-2 py-2`}
                   min={1}
                   max={totalPages ?? undefined}
                   value={pageInput}
@@ -743,7 +943,7 @@ function PageBody() {
 
                 <button
                   type="button"
-                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  className={`rounded-lg ${theme.classes.secondaryButton} ${theme.classes.secondaryButtonHover} px-3 py-2 text-sm disabled:opacity-50`}
                   disabled={isSearching || !canPrev() || offset === 0}
                   onClick={() => {
                     if (!canPrev() || offset === 0) return;
@@ -757,7 +957,7 @@ function PageBody() {
 
                 <button
                   type="button"
-                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  className={`rounded-lg ${theme.classes.secondaryButton} ${theme.classes.secondaryButtonHover} px-3 py-2 text-sm disabled:opacity-50`}
                   disabled={isSearching || !canPrev()}
                   onClick={() => {
                     if (!canPrev()) return;
@@ -772,7 +972,7 @@ function PageBody() {
 
                 <button
                   type="button"
-                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  className={`rounded-lg ${theme.classes.secondaryButton} ${theme.classes.secondaryButtonHover} px-3 py-2 text-sm disabled:opacity-50`}
                   disabled={isSearching || !canNext()}
                   onClick={() => {
                     if (!canNext()) return;
@@ -788,7 +988,7 @@ function PageBody() {
 
                 <button
                   type="button"
-                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                  className={`rounded-lg ${theme.classes.secondaryButton} ${theme.classes.secondaryButtonHover} px-3 py-2 text-sm disabled:opacity-50`}
                   disabled={
                     isSearching ||
                     computeLastOffset() === null ||
@@ -809,7 +1009,7 @@ function PageBody() {
           </div>
         ) : (
           query.trim() !== "" &&
-          !isSearching && <p className="mt-6 text-sm text-slate-400">No results for &quot;{query}&quot;. Try different keywords.</p>
+          !isSearching && <p className={`mt-6 text-sm ${theme.classes.textMuted}`}>No results for &quot;{query}&quot;. Try different keywords.</p>
         )}
 
         {selectedDoc && (
@@ -821,6 +1021,7 @@ function PageBody() {
                 setSelectedDoc(null);
                 writeUrl({ doc: null });
               }}
+              theme={theme}
             />
           </div>
         )}
@@ -837,9 +1038,11 @@ function PageBody() {
 function ChatPanel({
   selectedDoc,
   onClear,
+  theme,
 }: {
   selectedDoc: { id: number; label: string };
   onClear: () => void;
+  theme: Theme;
 }) {
   function cleanLLMAnswer(raw: string): string {
     return String(raw)
@@ -1032,12 +1235,12 @@ function ChatPanel({
 
   return (
     <div id="chat-panel" className="mt-8">
-      <SectionTitle>💬 Chatting with: {selectedDoc.label}</SectionTitle>
+      <SectionTitle theme={theme}>💬 Chatting with: {selectedDoc.label}</SectionTitle>
 
-      <Card className="mt-3 p-5 bg-indigo-950/70 border-indigo-700">
+      <Card theme={theme} className={`mt-3 p-5 ${theme.classes.chatPanel}`}>
         {qaLog.length > 0 && (
           <div className="mb-5">
-            <div className="mb-2 text-xs font-medium text-indigo-200/90">
+            <div className={`mb-2 text-xs font-medium ${theme.classes.textSecondary}`}>
               This session: {qaLog.length} question{qaLog.length === 1 ? "" : "s"}
             </div>
             <ul className="space-y-3">
@@ -1048,7 +1251,7 @@ function ChatPanel({
                 const itemT = getTranslation(item.q);
                 return (
                   <li key={item.ts}>
-                    <article className={`rounded-xl border border-indigo-800/60 bg-indigo-900/40 transition ${isOpen ? "shadow-lg" : ""}`}>
+                    <article className={`rounded-xl border ${theme.classes.historyCardBorder} ${theme.classes.historyCard} transition ${isOpen ? "shadow-lg" : ""}`}>
                       <button
                         className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left"
                         onClick={() => toggleHistory(item.ts)}
@@ -1056,14 +1259,14 @@ function ChatPanel({
                         aria-controls={cardId}
                       >
                         <div className="min-w-0">
-                          <div className="font-medium text-indigo-100 truncate">{itemT.question}: {item.q}</div>
+                          <div className={`font-medium ${theme.classes.text} truncate`}>{itemT.question}: {item.q}</div>
                           {!isOpen && (
-                            <div className="mt-1 text-sm text-indigo-200/90 line-clamp-1">
+                            <div className={`mt-1 text-sm ${theme.classes.textSecondary} line-clamp-1`}>
                               {itemT.answer}: {item.a}
                             </div>
                           )}
                         </div>
-                        <span className="shrink-0 rounded-md border border-indigo-700 px-2 py-1 text-xs text-indigo-200">
+                        <span className={`shrink-0 rounded-md border ${theme.classes.chatPanelBorder} px-2 py-1 text-xs ${theme.classes.badgeText}`}>
                           {isOpen ? "Hide" : "Expand"}
                         </span>
                       </button>
@@ -1077,7 +1280,7 @@ function ChatPanel({
                           {Array.isArray(item.chunks) && item.chunks.length > 0 && (
                             <div className="mt-3">
                               <button
-                                className="rounded-md border border-indigo-700 px-2 py-1 text-xs text-indigo-200 hover:bg-indigo-900"
+                                className={`rounded-md border ${theme.classes.chatPanelBorder} px-2 py-1 text-xs ${theme.classes.textSecondary} ${theme.classes.secondaryButtonHover}`}
                                 onClick={() => toggleHistoryExcerpts(item.ts)}
                               >
                                 {showHx ? "Hide excerpts" : "Show excerpts"}
@@ -1085,12 +1288,12 @@ function ChatPanel({
                               {showHx && (
                                 <div className="mt-2 space-y-2">
                                   {item.chunks.map((ch, i) => (
-                                    <div key={i} className="rounded bg-indigo-800/40 p-2 text-sm text-indigo-100">
-                                      <div className="mb-1 font-medium text-indigo-200/90">
+                                    <div key={i} className={`rounded ${theme.classes.excerptBg} p-2 text-sm`}>
+                                      <div className={`mb-1 font-medium ${theme.classes.textSecondary}`}>
                                         Excerpt [{ch.chunk_no ?? i + 1}]
                                       </div>
                                       {ch.display_header && (
-                                        <div className="mb-1 text-indigo-200/80">
+                                        <div className={`mb-1 ${theme.classes.textMuted}`}>
                                           {ch.display_header}
                                         </div>
                                       )}
@@ -1116,8 +1319,8 @@ function ChatPanel({
         {answerMarkdown && (
           <div className="mt-0 mb-4" aria-live="polite">
             {isStreaming && (
-              <div className="mb-2 flex items-center gap-2 text-xs text-indigo-300">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
+              <div className={`mb-2 flex items-center gap-2 text-xs ${theme.classes.textSecondary}`}>
+                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
                 <span>{t.streaming}</span>
               </div>
             )}
@@ -1135,17 +1338,17 @@ function ChatPanel({
                 onChange={(e) => setShowSources(e.target.checked)}
                 className="h-4 w-4 cursor-pointer"
               />
-              <label htmlFor="toggle-sources" className="text-sm text-indigo-200 cursor-pointer">
+              <label htmlFor="toggle-sources" className={`text-sm ${theme.classes.textSecondary} cursor-pointer`}>
                 Show supporting excerpts
               </label>
             </div>
             {showSources && (
               <div className="mt-2 space-y-2">
                 {chunks.map((ch, i) => (
-                  <div key={i} className="rounded bg-indigo-800/50 p-3 text-sm text-indigo-100">
-                    <div className="mb-1 font-medium text-indigo-200/90">Excerpt [{ch.chunk_no ?? i + 1}]</div>
+                  <div key={i} className={`rounded ${theme.classes.excerptBg} p-3 text-sm`}>
+                    <div className={`mb-1 font-medium ${theme.classes.textSecondary}`}>Excerpt [{ch.chunk_no ?? i + 1}]</div>
                     {ch.display_header && (
-                      <div className="mb-1 text-indigo-200/80">
+                      <div className={`mb-1 ${theme.classes.textMuted}`}>
                         {ch.display_header}
                       </div>
                     )}
@@ -1171,7 +1374,7 @@ function ChatPanel({
                 ? "Enter another question about this judgment…"
                 : "Enter your question about this judgment (e.g., final orders, parties, issues)…"
             }
-            className="flex-1 h-24 rounded-xl border border-stone-300 bg-stone-50 px-4 py-3 text-stone-900 placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            className={`flex-1 h-24 rounded-xl ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
             autoComplete="off"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -1181,7 +1384,7 @@ function ChatPanel({
             }}
           />
           <div className="flex items-center gap-3">
-            <label className="text-xs text-indigo-200" htmlFor="k-range">k</label>
+            <label className={`text-xs ${theme.classes.textSecondary}`} htmlFor="k-range">k</label>
             <input
               id="k-range"
               type="range"
@@ -1190,21 +1393,21 @@ function ChatPanel({
               step={1}
               value={k}
               onChange={(e) => setK(Number(e.target.value))}
-              className="h-2 w-24 cursor-pointer appearance-none rounded-lg bg-indigo-800"
+              className={`h-2 w-24 cursor-pointer appearance-none rounded-lg ${theme.classes.excerptBg}`}
               aria-valuemin={2}
               aria-valuemax={12}
               aria-valuenow={k}
             />
-            <span className="w-6 text-center text-xs text-indigo-200">{k}</span>
+            <span className={`w-6 text-center text-xs ${theme.classes.textSecondary}`}>{k}</span>
             <button
               onClick={() => void ask()}
               disabled={!question.trim() || isLoading || isStreaming}
-              className="rounded-xl bg-indigo-500 px-4 py-3 font-medium text-indigo-950 hover:bg-indigo-400 disabled:opacity-60"
+              className={`rounded-xl ${theme.classes.button} px-4 py-3 font-medium disabled:opacity-60`}
               aria-label="Ask question"
             >
               {isLoading || isStreaming ? (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-900 border-t-transparent" />
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                   {isStreaming ? t.streaming : t.asking}
                 </span>
               ) : (
@@ -1215,11 +1418,14 @@ function ChatPanel({
         </div>
 
         <div className="mt-4 flex items-center gap-3">
-          <button className="rounded bg-rose-500 px-3 py-2 text-sm text-white hover:bg-rose-400" onClick={onClear}>
+          <button 
+            className={`rounded ${theme.classes.dangerButton} px-3 py-2 text-sm`} 
+            onClick={onClear}
+          >
             🔄 {t.clearSelection}
           </button>
           <button
-            className="rounded border border-indigo-700 px-3 py-2 text-sm text-indigo-200 hover:bg-indigo-900"
+            className={`rounded border ${theme.classes.secondaryButton} ${theme.classes.secondaryButtonHover} px-3 py-2 text-sm`}
             onClick={() => {
               setQuestion("");
               setAnswer(null);
