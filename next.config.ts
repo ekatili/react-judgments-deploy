@@ -4,7 +4,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'https://ts38eztsnz.us-east-1.awsapprunner.com/:path*',
+        destination: 'https://ts38eztsnz.us-east-1.awsapprunner.com//:path*',
       },
     ];
   },

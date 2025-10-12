@@ -72,35 +72,9 @@ function limitPasteIntoInput<T extends HTMLInputElement | HTMLTextAreaElement>(
 }
 
 // ===== API base & helper (lint-safe) =====
-
-// Let TS know about our one-time warning flag on window
-declare global {
-  interface Window {
-    __ABS_API_WARNED__?: boolean;
-  }
-}
-
-const ABS_API: string = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  process.env.NEXT_PUBLIC_BACKEND_URL ||
-  ""
-).trim();
-
-// If no absolute backend is configured, warn once in the browser.
-// (Dev-only UX; harmless in production too.)
-if (!ABS_API && typeof window !== "undefined") {
-  if (!window.__ABS_API_WARNED__) {
-    console.warn(
-      "[frontend] NEXT_PUBLIC_API_URL / NEXT_PUBLIC_BACKEND_URL is empty — falling back to /api proxy"
-    );
-    window.__ABS_API_WARNED__ = true;
-  }
-}
-
-const apiUrl = (path: string): string => {
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return ABS_API ? `${ABS_API}${p}` : `/api${p}`;
-};
+const ABS_API = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+const apiUrl = (path: string) =>
+  ABS_API ? `${ABS_API}${path}` : `/api${path.startsWith("/") ? path : `/${path}`}`;
 
 // ----- Types -----
 interface SearchHit {
