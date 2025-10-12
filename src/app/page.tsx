@@ -72,7 +72,11 @@ function limitPasteIntoInput<T extends HTMLInputElement | HTMLTextAreaElement>(
 }
 
 // ===== API base & helper =====
-const ABS_API = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+const ABS_API =
+  (process.env.NEXT_PUBLIC_API_URL ||
+   process.env.NEXT_PUBLIC_BACKEND_URL ||
+   "").trim();
+
 const apiUrl = (path: string) =>
   ABS_API ? `${ABS_API}${path}` : `/api${path.startsWith("/") ? path : `/${path}`}`;
 
