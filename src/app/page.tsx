@@ -351,7 +351,7 @@ function normalizeSearchPayload(data: unknown): {
 
 async function fetchDocPreview(docId: number, signal?: AbortSignal): Promise<DocMeta | null> {
   try {
-    const r = await fetch(apiUrl(`/docs/${docId}/preview`), { signal, cache: "no-store" });
+    const r = await fetch(apiUrl(`/docs/${docId}/preview`), { signal});
     if (!r.ok) return null;
     const j: unknown = await r.json();
     return isObject(j) ? (j as DocMeta) : null;
