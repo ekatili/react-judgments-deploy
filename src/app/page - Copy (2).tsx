@@ -1266,6 +1266,7 @@ function ChatPanel({
             isDone = true;
           }
         } catch {
+          // ignore partial/garbled tail
         }
         buffer = "";
       }
@@ -1358,17 +1359,14 @@ function ChatPanel({
   const answerMarkdown =
     displayAnswer == null ? null : (lastQuestion ? `## ${t.question}\n${lastQuestion}\n\n## ${t.answer}\n` : "") + String(displayAnswer);
 
-  // --- Typing effect wiring (on the Answer card) ---
+  // --- Typing effect wiring (added) ---
   const typingKey = `${selectedDoc.id}|${lastQuestion ?? ""}|${(answerMarkdown ?? "").length}`;
-  const { text: typedText, done: typingDone } = useTyping(answerMarkdown ?? "", {
+  const { text: typedText } = useTyping(answerMarkdown ?? "", {
     enabled: Boolean(isStreaming),
     cps: 70,
     punctuationPauseMs: 140,
     key: typingKey,
   });
-  // Add a subtle cursor while streaming inside the markdown
-  const cursorChar = isStreaming && !typingDone ? " ▍" : "";
-  const typedMarkdown = `${typedText}${cursorChar}`;
 
   return (
     <div id="chat-panel" className="mt-8">
@@ -1463,8 +1461,11 @@ function ChatPanel({
             )}
 
             {isStreaming ? (
-              // Render typing directly on the Answer card (markdown component)
-              <AnswerDisplay markdown={typedMarkdown} />
+              // Lightweight live view with typing effect during token flow
+              <div className={`${theme.classes.text} whitespace-pre-wrap leading-relaxed`}>
+                {typedText}
+                <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-emerald-400 align-text-bottom" />
+              </div>
             ) : (
               // Pretty render once done
               <AnswerDisplay markdown={answerMarkdown} />
