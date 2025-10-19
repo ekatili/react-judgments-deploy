@@ -59,7 +59,8 @@ const themes: Record<ThemeName, Theme> = {
     label: '🌙 Deep Dark',
     classes: {
       body: 'bg-slate-950 text-slate-200',
-      card: 'bg-slate-900/60 border-slate-800/40',
+      card: 'bg-slate-900/80 border-slate-700 shadow-xl shadow-emerald-500/10 backdrop-blur-lg',
+
       cardHover: 'hover:border-slate-600',
       cardExpanded: 'border-slate-700 bg-slate-900/70',
       input: 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-400 focus:ring-emerald-400',
@@ -103,7 +104,7 @@ const themes: Record<ThemeName, Theme> = {
       text: 'text-gray-900',
       textSecondary: 'text-gray-700',
       textMuted: 'text-gray-500',
-      border: 'border-gray-200',
+      border: 'border-gray-500',
       borderLight: 'border-gray-300',
       chatPanel: 'bg-gray-50 border-gray-200',
       chatPanelBorder: 'border-gray-300',
@@ -711,8 +712,7 @@ function PageBody() {
             currentTheme={currentTheme} 
             onChangeTheme={changeTheme}
             allThemes={allThemes}
-            theme={theme}
-          />
+            theme={theme}       />
         </div>
 
         <div className="mb-6">
@@ -736,7 +736,7 @@ function PageBody() {
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
               placeholder={`Search judgments e.g. ${EXAMPLES[hintIndex]}`}
-              className={`flex-1 rounded-xl ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
+              className={`flex-1 rounded-xl border ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
               autoComplete="off"
               inputMode="search"
             />
@@ -751,7 +751,7 @@ function PageBody() {
                   setLimit(newLimit);
                   void doSearch(query, 0, newLimit);
                 }}
-                className={`rounded-lg ${theme.classes.select} px-2 py-2`}
+                className={`rounded-lg border ${theme.classes.select} px-2 py-2`}
               >
                 {[10, 12, 15, 20, 30, 50].map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
@@ -918,7 +918,7 @@ function PageBody() {
                 <input
                   id="page-jump"
                   type="number"
-                  className={`w-20 rounded-lg ${theme.classes.input} px-2 py-2`}
+                  className={`w-20 rounded-lg border ${theme.classes.input} px-2 py-2`}
                   min={1}
                   max={totalPages ?? undefined}
                   value={pageInput}
@@ -1374,7 +1374,7 @@ function ChatPanel({
                 ? "Enter another question about this judgment…"
                 : "Enter your question about this judgment (e.g., final orders, parties, issues)…"
             }
-            className={`flex-1 h-24 rounded-xl ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
+            className={`flex-1 h-24 rounded-xl border ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
             autoComplete="off"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

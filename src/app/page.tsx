@@ -1103,7 +1103,10 @@ function ChatPanel({
     try {
       const r = await fetch(apiUrl("/chat/stream"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/x-ndjson",
+         },
         body: JSON.stringify({ doc_id: Number(selectedDoc.id), question: q, k }),
         signal: ac.signal,
       });
@@ -1117,6 +1120,23 @@ function ChatPanel({
       let accumulatedAnswer = "";
       let currentRunId: string | null = null;
       let isDone = false;
+
+      // --- micro-batching: update UI at most once per animation frame
+      let rafScheduled = false;
+      let pendingText = "";
+
+      const schedulePush = () => {
+        if (rafScheduled) return;
+        rafScheduled = true;
+        requestAnimationFrame(() => {
+          if (pendingText) {
+            setStreamingAnswer(prev => prev + pendingText);
+            pendingText = "";
+       }
+          rafScheduled = false;
+   });
+  };
+
 
       while (!isDone) {
         const { done, value } = await reader.read();
@@ -1140,7 +1160,8 @@ function ChatPanel({
 
             if (json.delta && typeof json.delta === "string") {
               accumulatedAnswer += json.delta;
-              setStreamingAnswer(accumulatedAnswer);
+              pendingText += json.delta;
+              schedulePush();
             }
 
             if (json.done === true) {
@@ -1152,6 +1173,32 @@ function ChatPanel({
           }
         }
       }
+
+          // --- FINAL FLUSH AFTER LOOP ---
+      // If there's a leftover, non-newline-terminated JSON object, try to parse it.
+      if (buffer.trim()) {
+      try {
+        const tail = JSON.parse(buffer.trim());
+        if (typeof tail.delta === "string" && tail.delta.length) {
+          accumulatedAnswer += tail.delta;
+          pendingText += tail.delta;
+          schedulePush();
+        }
+        if (tail.done === true) {
+          isDone = true;
+        }
+      } catch {
+        // ignore partial/garbled tail
+      }
+      buffer = "";
+      }
+
+      // Push any pending text that hasn't painted yet.
+      if (pendingText) {
+      setStreamingAnswer(prev => prev + pendingText);
+      pendingText = "";
+      }
+
 
       const cleaned = cleanLLMAnswer(accumulatedAnswer);
       setAnswer(cleaned);
@@ -1194,7 +1241,10 @@ function ChatPanel({
     try {
       const r = await fetch(apiUrl("/chat"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/x-ndjson"
+         },
         body: JSON.stringify({ doc_id: Number(selectedDoc.id), question, k }),
         signal: ac.signal,
       });
@@ -1316,7 +1366,7 @@ function ChatPanel({
           </div>
         )}
 
-        {answerMarkdown && (
+        {answerMarkdown !== null && (
           <div className="mt-0 mb-4" aria-live="polite">
             {isStreaming && (
               <div className={`mb-2 flex items-center gap-2 text-xs ${theme.classes.textSecondary}`}>
@@ -1324,9 +1374,20 @@ function ChatPanel({
                 <span>{t.streaming}</span>
               </div>
             )}
-            <AnswerDisplay markdown={answerMarkdown} />
+
+            {isStreaming ? (
+              // Lightweight live view: no markdown parse during token flow
+              <div className={`${theme.classes.text} whitespace-pre-wrap leading-relaxed`}>
+                {answerMarkdown}
+              </div>
+            ) : (
+              // Pretty render once done
+              <AnswerDisplay markdown={answerMarkdown} />
+            )}
           </div>
         )}
+
+
 
         {chunks.length > 0 && (
           <>
