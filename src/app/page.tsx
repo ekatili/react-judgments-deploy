@@ -59,7 +59,8 @@ const themes: Record<ThemeName, Theme> = {
     label: '🌙 Deep Dark',
     classes: {
       body: 'bg-slate-950 text-slate-200',
-      card: 'bg-slate-900/60 border-slate-800/40',
+      card: 'bg-slate-900/80 border-slate-700 shadow-xl shadow-emerald-500/10 backdrop-blur-lg',
+
       cardHover: 'hover:border-slate-600',
       cardExpanded: 'border-slate-700 bg-slate-900/70',
       input: 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-400 focus:ring-emerald-400',
@@ -103,7 +104,7 @@ const themes: Record<ThemeName, Theme> = {
       text: 'text-gray-900',
       textSecondary: 'text-gray-700',
       textMuted: 'text-gray-500',
-      border: 'border-gray-200',
+      border: 'border-gray-500',
       borderLight: 'border-gray-300',
       chatPanel: 'bg-gray-50 border-gray-200',
       chatPanelBorder: 'border-gray-300',
