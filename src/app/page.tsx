@@ -8,6 +8,7 @@
  * - Uses display_header from backend when available
  * - Added language detection for English/Swahili UI
  * - Added ChatGPT-style theme switcher (Deep Dark, Light, Dark)
+ * - FIXED typing effect to animate the entire streamed response
  */
 
 import React, { Suspense } from "react";
@@ -1033,7 +1034,7 @@ function PageBody() {
 }
 
 // ============================================================================
-// Typing effect hook (added)
+// Typing effect hook (fixed to not reset mid-stream)
 // ============================================================================
 function useTyping(
   fullText: string,
@@ -1055,7 +1056,7 @@ function useTyping(
   const rafRef = React.useRef<number | null>(null);
   const lastTimeRef = React.useRef<number | null>(null);
 
-  // Reset when key changes (new run/question) or new text shrinks
+  // Reset only when the run changes (stable key), not on each token
   React.useEffect(() => {
     idxRef.current = 0;
     setDisplay("");
@@ -1084,7 +1085,7 @@ function useTyping(
         const nextSlice = fullText.slice(0, nextIdx);
         setDisplay(nextSlice);
         const ch = fullText.charAt(nextIdx - 1);
-        // add tiny pause after punctuation
+        // tiny pause after punctuation
         if (/[.,;:!?…]/.test(ch)) {
           lastTimeRef.current = t + punctuationPauseMs;
         } else {
@@ -1358,16 +1359,21 @@ function ChatPanel({
   const answerMarkdown =
     displayAnswer == null ? null : (lastQuestion ? `## ${t.question}\n${lastQuestion}\n\n## ${t.answer}\n` : "") + String(displayAnswer);
 
-  // --- Typing effect wiring (on the Answer card) ---
-  const typingKey = `${selectedDoc.id}|${lastQuestion ?? ""}|${(answerMarkdown ?? "").length}`;
-  const { text: typedText, done: typingDone } = useTyping(answerMarkdown ?? "", {
-    enabled: Boolean(isStreaming),
+  // --- Typing effect wiring (fixed) ---
+  // Use a stable key per run (no length!)
+  const typingKey = `${selectedDoc.id}|${lastQuestion ?? ""}`;
+  const full = answerMarkdown ?? "";
+
+  // Keep typing until we reach full content, even after stream ends
+  const { text: typedText, done: typingDone } = useTyping(full, {
+    enabled: true,             // always animate; it will stop when done
     cps: 70,
     punctuationPauseMs: 140,
     key: typingKey,
   });
-  // Add a subtle cursor while streaming inside the markdown
-  const cursorChar = isStreaming && !typingDone ? " ▍" : "";
+
+  // Subtle cursor while typing or streaming
+  const cursorChar = (isStreaming || !typingDone) ? " ▍" : "";
   const typedMarkdown = `${typedText}${cursorChar}`;
 
   return (
@@ -1455,20 +1461,15 @@ function ChatPanel({
 
         {answerMarkdown !== null && (
           <div className="mt-0 mb-4" aria-live="polite">
-            {isStreaming && (
+            {(isStreaming || !typingDone) && (
               <div className={`mb-2 flex items-center gap-2 text-xs ${theme.classes.textSecondary}`}>
                 <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
                 <span>{t.streaming}</span>
               </div>
             )}
 
-            {isStreaming ? (
-              // Render typing directly on the Answer card (markdown component)
-              <AnswerDisplay markdown={typedMarkdown} />
-            ) : (
-              // Pretty render once done
-              <AnswerDisplay markdown={answerMarkdown} />
-            )}
+            {/* Always render typed version; no switch to static until typingDone */}
+            <AnswerDisplay markdown={typedMarkdown} />
           </div>
         )}
 
