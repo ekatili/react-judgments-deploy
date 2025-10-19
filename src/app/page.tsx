@@ -1033,6 +1033,86 @@ function PageBody() {
 }
 
 // ============================================================================
+// Typing effect hook (added)
+// ============================================================================
+function useTyping(
+  fullText: string,
+  {
+    enabled = true,
+    cps = 70,
+    punctuationPauseMs = 140,
+    key,
+  }: {
+    enabled?: boolean;
+    cps?: number;                 // characters per second
+    punctuationPauseMs?: number;  // micro-pause after punctuation
+    key?: string;                 // reset key (e.g., run id + question)
+  } = {}
+) {
+  const [display, setDisplay] = React.useState("");
+  const [done, setDone] = React.useState(false);
+  const idxRef = React.useRef(0);
+  const rafRef = React.useRef<number | null>(null);
+  const lastTimeRef = React.useRef<number | null>(null);
+
+  // Reset when key changes (new run/question) or new text shrinks
+  React.useEffect(() => {
+    idxRef.current = 0;
+    setDisplay("");
+    setDone(false);
+    lastTimeRef.current = null;
+  }, [key]);
+
+  React.useEffect(() => {
+    if (!enabled) {
+      setDisplay(fullText);
+      setDone(true);
+      return;
+    }
+
+    let canceled = false;
+
+    const step = (t: number) => {
+      if (canceled) return;
+
+      if (lastTimeRef.current == null) lastTimeRef.current = t;
+      const elapsed = t - lastTimeRef.current;
+      const chars = Math.max(1, Math.floor((elapsed / 1000) * cps));
+      const nextIdx = Math.min(fullText.length, idxRef.current + chars);
+
+      if (nextIdx !== idxRef.current) {
+        const nextSlice = fullText.slice(0, nextIdx);
+        setDisplay(nextSlice);
+        const ch = fullText.charAt(nextIdx - 1);
+        // add tiny pause after punctuation
+        if (/[.,;:!?…]/.test(ch)) {
+          lastTimeRef.current = t + punctuationPauseMs;
+        } else {
+          lastTimeRef.current = t;
+        }
+        idxRef.current = nextIdx;
+      }
+
+      if (idxRef.current >= fullText.length) {
+        setDone(true);
+        rafRef.current = null;
+        return;
+      }
+      rafRef.current = requestAnimationFrame(step);
+    };
+
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      canceled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [fullText, enabled, cps, punctuationPauseMs]);
+
+  return { text: display, done };
+}
+
+// ============================================================================
 // ChatPanel - WITH STREAMING SUPPORT & LANGUAGE DETECTION
 // ============================================================================
 function ChatPanel({
@@ -1132,11 +1212,10 @@ function ChatPanel({
           if (pendingText) {
             setStreamingAnswer(prev => prev + pendingText);
             pendingText = "";
-       }
+          }
           rafScheduled = false;
-   });
-  };
-
+        });
+      };
 
       while (!isDone) {
         const { done, value } = await reader.read();
@@ -1174,31 +1253,28 @@ function ChatPanel({
         }
       }
 
-          // --- FINAL FLUSH AFTER LOOP ---
-      // If there's a leftover, non-newline-terminated JSON object, try to parse it.
+      // --- FINAL FLUSH AFTER LOOP ---
       if (buffer.trim()) {
-      try {
-        const tail = JSON.parse(buffer.trim());
-        if (typeof tail.delta === "string" && tail.delta.length) {
-          accumulatedAnswer += tail.delta;
-          pendingText += tail.delta;
-          schedulePush();
+        try {
+          const tail = JSON.parse(buffer.trim());
+          if (typeof tail.delta === "string" && tail.delta.length) {
+            accumulatedAnswer += tail.delta;
+            pendingText += tail.delta;
+            schedulePush();
+          }
+          if (tail.done === true) {
+            isDone = true;
+          }
+        } catch {
+          // ignore partial/garbled tail
         }
-        if (tail.done === true) {
-          isDone = true;
-        }
-      } catch {
-        // ignore partial/garbled tail
-      }
-      buffer = "";
+        buffer = "";
       }
 
-      // Push any pending text that hasn't painted yet.
       if (pendingText) {
-      setStreamingAnswer(prev => prev + pendingText);
-      pendingText = "";
+        setStreamingAnswer(prev => prev + pendingText);
+        pendingText = "";
       }
-
 
       const cleaned = cleanLLMAnswer(accumulatedAnswer);
       setAnswer(cleaned);
@@ -1282,6 +1358,15 @@ function ChatPanel({
   const displayAnswer = isStreaming ? streamingAnswer : answer;
   const answerMarkdown =
     displayAnswer == null ? null : (lastQuestion ? `## ${t.question}\n${lastQuestion}\n\n## ${t.answer}\n` : "") + String(displayAnswer);
+
+  // --- Typing effect wiring (added) ---
+  const typingKey = `${selectedDoc.id}|${lastQuestion ?? ""}|${(answerMarkdown ?? "").length}`;
+  const { text: typedText } = useTyping(answerMarkdown ?? "", {
+    enabled: Boolean(isStreaming),
+    cps: 70,
+    punctuationPauseMs: 140,
+    key: typingKey,
+  });
 
   return (
     <div id="chat-panel" className="mt-8">
@@ -1376,9 +1461,10 @@ function ChatPanel({
             )}
 
             {isStreaming ? (
-              // Lightweight live view: no markdown parse during token flow
+              // Lightweight live view with typing effect during token flow
               <div className={`${theme.classes.text} whitespace-pre-wrap leading-relaxed`}>
-                {answerMarkdown}
+                {typedText}
+                <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-emerald-400 align-text-bottom" />
               </div>
             ) : (
               // Pretty render once done
@@ -1386,8 +1472,6 @@ function ChatPanel({
             )}
           </div>
         )}
-
-
 
         {chunks.length > 0 && (
           <>
