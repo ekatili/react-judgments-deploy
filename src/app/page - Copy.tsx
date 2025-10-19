@@ -736,7 +736,7 @@ function PageBody() {
               onPaste={(e) => limitPasteIntoInput(e, MAX_SEARCH_LEN, setQuery, setErrorMsg)}
               maxLength={MAX_SEARCH_LEN}
               placeholder={`Search judgments e.g. ${EXAMPLES[hintIndex]}`}
-              className={`flex-1 rounded-xl border ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
+              className={`flex-1 rounded-xl ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
               autoComplete="off"
               inputMode="search"
             />
@@ -751,7 +751,7 @@ function PageBody() {
                   setLimit(newLimit);
                   void doSearch(query, 0, newLimit);
                 }}
-                className={`rounded-lg border ${theme.classes.select} px-2 py-2`}
+                className={`rounded-lg ${theme.classes.select} px-2 py-2`}
               >
                 {[10, 12, 15, 20, 30, 50].map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
@@ -918,7 +918,7 @@ function PageBody() {
                 <input
                   id="page-jump"
                   type="number"
-                  className={`w-20 rounded-lg border ${theme.classes.input} px-2 py-2`}
+                  className={`w-20 rounded-lg ${theme.classes.input} px-2 py-2`}
                   min={1}
                   max={totalPages ?? undefined}
                   value={pageInput}
@@ -1374,7 +1374,7 @@ function ChatPanel({
                 ? "Enter another question about this judgment…"
                 : "Enter your question about this judgment (e.g., final orders, parties, issues)…"
             }
-            className={`flex-1 h-24 rounded-xl border ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
+            className={`flex-1 h-24 rounded-xl ${theme.classes.input} px-4 py-3 focus:outline-none focus:ring-2`}
             autoComplete="off"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
