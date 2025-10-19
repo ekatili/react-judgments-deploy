@@ -705,15 +705,7 @@ function PageBody() {
     <main className={`min-h-screen ${theme.classes.body} transition-colors duration-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]`}>
       <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500" />
       <div className="mx-auto max-w-5xl px-4 py-8 md:py-10">
-        {/* Theme Switcher */}
-        <div className="mb-4 flex justify-end">
-          <ThemeSwitcher 
-            currentTheme={currentTheme} 
-            onChangeTheme={changeTheme}
-            allThemes={allThemes}
-            theme={theme}
-          />
-        </div>
+
 
         <div className="mb-6">
           <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
