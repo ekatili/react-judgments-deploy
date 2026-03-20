@@ -707,7 +707,6 @@ function PageBody() {
     <main className={`min-h-screen ${theme.classes.body} transition-colors duration-200 [background-image:radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.05),transparent_60%)]`}>
       <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500" />
       <div className="mx-auto max-w-5xl px-4 py-8 md:py-10">
-        {/* Theme Switcher */}
         <div className="mb-4 flex justify-end">
           <ThemeSwitcher 
             currentTheme={currentTheme} 
@@ -850,10 +849,6 @@ function PageBody() {
                           {isOpen ? "Hide" : "Expand"}
                         </span>
                       </header>
-
-                      {(meta?.parties ?? hit.parties) && (
-                        <p className={`mt-1 text-sm ${theme.classes.textSecondary}`}>{meta?.parties ?? hit.parties}</p>
-                      )}
 
                       {isOpen && (
                         <div className="mt-3 space-y-2">
@@ -1045,9 +1040,9 @@ function useTyping(
     key,
   }: {
     enabled?: boolean;
-    cps?: number;                 // characters per second
-    punctuationPauseMs?: number;  // micro-pause after punctuation
-    key?: string;                 // reset key (e.g., run id + question)
+    cps?: number;
+    punctuationPauseMs?: number;
+    key?: string;
   } = {}
 ) {
   const [display, setDisplay] = React.useState("");
@@ -1056,7 +1051,6 @@ function useTyping(
   const rafRef = React.useRef<number | null>(null);
   const lastTimeRef = React.useRef<number | null>(null);
 
-  // Reset only when the run changes (stable key), not on each token
   React.useEffect(() => {
     idxRef.current = 0;
     setDisplay("");
@@ -1085,7 +1079,6 @@ function useTyping(
         const nextSlice = fullText.slice(0, nextIdx);
         setDisplay(nextSlice);
         const ch = fullText.charAt(nextIdx - 1);
-        // tiny pause after punctuation
         if (/[.,;:!?…]/.test(ch)) {
           lastTimeRef.current = t + punctuationPauseMs;
         } else {
@@ -1150,7 +1143,6 @@ function ChatPanel({
 
   const askAbortRef = React.useRef<AbortController | null>(null);
 
-  // Detect language from last question
   const t = getTranslation(lastQuestion || question);
 
   function toggleHistory(ts: number) {
@@ -1202,7 +1194,6 @@ function ChatPanel({
       let currentRunId: string | null = null;
       let isDone = false;
 
-      // --- micro-batching: update UI at most once per animation frame
       let rafScheduled = false;
       let pendingText = "";
 
@@ -1254,7 +1245,6 @@ function ChatPanel({
         }
       }
 
-      // --- FINAL FLUSH AFTER LOOP ---
       if (buffer.trim()) {
         try {
           const tail = JSON.parse(buffer.trim());
@@ -1359,20 +1349,16 @@ function ChatPanel({
   const answerMarkdown =
     displayAnswer == null ? null : (lastQuestion ? `## ${t.question}\n${lastQuestion}\n\n## ${t.answer}\n` : "") + String(displayAnswer);
 
-  // --- Typing effect wiring (fixed) ---
-  // Use a stable key per run (no length!)
   const typingKey = `${selectedDoc.id}|${lastQuestion ?? ""}`;
   const full = answerMarkdown ?? "";
 
-  // Keep typing until we reach full content, even after stream ends
   const { text: typedText, done: typingDone } = useTyping(full, {
-    enabled: true,             // always animate; it will stop when done
+    enabled: true,
     cps: 70,
     punctuationPauseMs: 140,
     key: typingKey,
   });
 
-  // Subtle cursor while typing or streaming
   const cursorChar = (isStreaming || !typingDone) ? " ▍" : "";
   const typedMarkdown = `${typedText}${cursorChar}`;
 
@@ -1468,7 +1454,6 @@ function ChatPanel({
               </div>
             )}
 
-            {/* Always render typed version; no switch to static until typingDone */}
             <AnswerDisplay markdown={typedMarkdown} />
           </div>
         )}
